@@ -40,7 +40,10 @@ namespace vm
 			std::printf("[!] failed to get all vm handlers...\n");
 			return false;
 		}
+
 		std::printf("> got all vm handlers...\n");
+		for (const vm::handler_t& vm_handler : vm_handlers)
+			std::printf(">>> handler addr = 0x%p\n", vm_handler.address);
 
 		//
 		// unicorn init stuff...
@@ -221,14 +224,14 @@ namespace vm
 		{
 			switch (jmp_reg)
 			{
-			ZYDIS_REGISTER_RDX:
+			case ZYDIS_REGISTER_RDX:
 				uc_reg_read(uc, UC_X86_REG_RDX, &reg_val);
 				break;
-			ZYDIS_REGISTER_RCX:
+			case ZYDIS_REGISTER_RCX:
 				uc_reg_read(uc, UC_X86_REG_RCX, &reg_val);
 				break;
 			default:
-				std::printf("[!] invalid jump register...\n");
+				std::printf("[!] invalid jump register... = %d\n", jmp_reg);
 				exit(0);
 			}
 

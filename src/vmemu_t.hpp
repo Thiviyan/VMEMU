@@ -7,6 +7,7 @@
 #include <functional>
 #include <mutex>
 #include <vmp2.hpp>
+#include <Zydis/Zydis.h>
 
 namespace vm
 {
