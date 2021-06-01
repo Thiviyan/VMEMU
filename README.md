@@ -15,7 +15,7 @@ You can continue the analysis using IDA outside of the virtual machine and then 
 In order to use VMEmu you must have an unpacked VMProtect 2 binary which you know some basic information about. 
 
 ```
-Usage: uc-tracer [options...]
+Usage: vmemu [options...]
 Options:
     --vmentry              relative virtual address to a vm entry... (Required)
     --vmpbin               path to unpacked virtualized binary... (Required)
