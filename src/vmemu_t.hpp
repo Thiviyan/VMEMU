@@ -2,8 +2,8 @@
 #include <exception>
 #include <cstdint>
 #include <unicorn/unicorn.h>
-#include <xtils/xtils.hpp>
-#include <vm.h>
+#include <xtils.hpp>
+#include <vmprofiler.hpp>
 #include <functional>
 #include <mutex>
 #include <vmp2.hpp>
@@ -35,7 +35,7 @@ namespace vm
 
 		zydis_routine_t vm_entry;
 		std::uintptr_t* vm_handler_table;
-		std::vector<vm::handler_t> vm_handlers;
+		std::vector<vm::handler::handler_t> vm_handlers;
 		std::vector<vmp2::entry_t>* trace_entries;
 	};
 }

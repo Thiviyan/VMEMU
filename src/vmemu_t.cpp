@@ -15,10 +15,7 @@ namespace vm
 
 	bool emu_t::init()
 	{
-		//
 		// vmprofiler init stuff...
-		//
-
 		if (!vm::util::flatten(vm_entry, vm_entry_rva + module_base))
 		{
 			std::printf("[!] failed to get vm entry...\n");
@@ -42,13 +39,10 @@ namespace vm
 		}
 
 		std::printf("> got all vm handlers...\n");
-		for (const vm::handler_t& vm_handler : vm_handlers)
+		for (const vm::handler::handler_t& vm_handler : vm_handlers)
 			std::printf(">>> handler addr = 0x%p\n", vm_handler.address);
 
-		//
 		// unicorn init stuff...
-		//
-
 		const auto image_size =
 			NT_HEADER(module_base)->OptionalHeader.SizeOfImage;
 
@@ -202,7 +196,8 @@ namespace vm
 			ZydisDecoderInit(&decoder,
 				ZYDIS_MACHINE_MODE_LONG_64, ZYDIS_ADDRESS_WIDTH_64); });
 
-		if (address == obj->vm_entry[obj->vm_entry.size() - 1].addr)
+        // last instruction in vm_entry is jmp rcx/rdx...
+        if (address == obj->vm_entry[obj->vm_entry.size() - 1].addr)
 		{
 			uc_err err;
 			vmp2::entry_t new_entry;
@@ -238,7 +233,7 @@ namespace vm
 			// checks to see if the address 
 			// in JMP RDX/RCX is a vm handler address...
 			static const auto vm_handler_check =
-				[&](const vm::handler_t& vm_handler) -> bool
+				[&](const vm::handler::handler_t& vm_handler) -> bool
 			{ return vm_handler.address == reg_val; };
 
 			if (std::find_if(obj->vm_handlers.begin(), obj->vm_handlers.end(),

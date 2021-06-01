@@ -2,14 +2,15 @@
 #include <fstream>
 #include <unicorn/unicorn.h>
 #include <cli-parser.hpp>
+#include <xtils.hpp>
+
 #include "vmemu_t.hpp"
 
 int __cdecl main(int argc, const char* argv[])
 {
-	argparse::argument_parser_t parser("uc-tracer", 
-		"VMProtect 2 Virtual Instruction Tracer Using Unicorn");
+    argparse::argument_parser_t parser( "VMEmu", "VMProtect 2 Static VM Handler Emulator" );
 
-	parser.add_argument()
+    parser.add_argument()
 		.name("--vmentry").required(true)
 		.description("relative virtual address to a vm entry...");
 
@@ -18,16 +19,8 @@ int __cdecl main(int argc, const char* argv[])
 		.description("path to unpacked virtualized binary...");
 
 	parser.add_argument()
-		.name("--imagebase").required(true)
-		.description("image base from optional PE header...");
-
-	parser.add_argument()
 		.name("--out").required(true)
 		.description("output file name for trace file...");
-
-	parser.add_argument()
-		.name("--advancement").required(true)
-		.description("the way in which the virtual instruction pointer advances... 'forward' or 'backward'...");
 
 	parser.enable_help();
 	auto result = parser.parse(argc, argv);
@@ -49,12 +42,45 @@ int __cdecl main(int argc, const char* argv[])
 	const auto vm_entry_rva = std::strtoull(
 		parser.get<std::string>("vmentry").c_str(), nullptr, 16);
 
-	const auto image_base = std::strtoull(
-		parser.get<std::string>("imagebase").c_str(), nullptr, 16);
+	const auto image_base = 
+		xtils::um_t::get_instance()->image_base( 
+			parser.get< std::string >( "vmpbin" ).c_str() );
 
 	const auto module_base = reinterpret_cast<std::uintptr_t>(
 		LoadLibraryExA(parser.get<std::string>("vmpbin").c_str(), 
 			NULL, DONT_RESOLVE_DLL_REFERENCES));
+
+	zydis_routine_t vm_entry, calc_jmp;
+    if ( !vm::util::flatten( vm_entry, vm_entry_rva + module_base ) )
+    {
+        std::printf( "> failed to flatten vm entry...\n" );
+        return -1;
+    }
+
+    vm::util::deobfuscate( vm_entry );
+    std::printf( "> flattened vm entry...\n" );
+    std::printf( "> deobfuscated vm entry...\n" );
+    std::printf( "==================================================================================\n" );
+    vm::util::print( vm_entry );
+
+    if ( !vm::calc_jmp::get( vm_entry, calc_jmp ) )
+    {
+        std::printf( "> failed to get calc_jmp...\n" );
+        return -1;
+    }
+
+	vm::util::deobfuscate( calc_jmp );
+    std::printf( "> calc_jmp extracted from vm_entry... calc_jmp:\n" );
+    std::printf( "==================================================================================\n" );
+    vm::util::print( calc_jmp );
+
+    const auto advancment = vm::calc_jmp::get_advancement( calc_jmp );
+
+    if ( !advancment.has_value() )
+    {
+        std::printf( "> failed to determine advancment...\n" );
+        return -1;
+    }
 
 	std::vector<vmp2::entry_t> entries;
 	vm::emu_t emu(vm_entry_rva, image_base, module_base);
@@ -80,8 +106,7 @@ int __cdecl main(int argc, const char* argv[])
 
 	file_header.epoch_time = time(nullptr);
 	file_header.entry_offset = sizeof file_header;
-	file_header.advancement = parser.get<std::string>("advancement") == 
-		"forward" ? vmp2::exec_type_t::forward : vmp2::exec_type_t::backward;
+    file_header.advancement = advancment.value();
 
 	file_header.version = vmp2::version_t::v1;
 	file_header.module_base = module_base;
@@ -96,5 +121,4 @@ int __cdecl main(int argc, const char* argv[])
 
 	output.close();
 	std::printf("> finished writing trace to disk...\n");
-	std::getchar();
 }
