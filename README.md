@@ -19,9 +19,7 @@ Usage: vmemu [options...]
 Options:
     --vmentry              relative virtual address to a vm entry... (Required)
     --vmpbin               path to unpacked virtualized binary... (Required)
-    --imagebase            image base from optional PE header... (Required)
     --out                  output file name for trace file... (Required)
-    --advancement          the way in which the virtual instruction pointer advances... 'forward' or 'backward'... (Required)
     -h, --help             Shows this page
 ```
 
