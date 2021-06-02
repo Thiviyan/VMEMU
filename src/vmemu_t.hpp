@@ -20,9 +20,9 @@ namespace vm
 		~emu_t();
 
 		bool init();
-		bool get_trace(std::vector<vmp2::entry_t>& entries);
+		bool get_trace(std::vector<vmp2::v2::entry_t>& entries);
 	private:
-		uc_err create_entry(vmp2::entry_t* entry);
+		uc_err create_entry(vmp2::v2::entry_t* entry);
 		static void hook_code(uc_engine* uc, uint64_t address, uint32_t size, vm::emu_t* obj);
 		static bool hook_mem_invalid(uc_engine* uc, uc_mem_type type,
 			uint64_t address, int size, int64_t value, vm::emu_t* obj);
@@ -36,6 +36,6 @@ namespace vm
 		zydis_routine_t vm_entry;
 		std::uintptr_t* vm_handler_table;
 		std::vector<vm::handler::handler_t> vm_handlers;
-		std::vector<vmp2::entry_t>* trace_entries;
+		std::vector<vmp2::v2::entry_t>* trace_entries;
 	};
 }

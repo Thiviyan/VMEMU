@@ -220,9 +220,6 @@
     <ClInclude Include="..\dependencies\vmprofiler\include\vmutils.h">
       <Filter>Header Files\vmprofiler</Filter>
     </ClInclude>
-    <ClInclude Include="..\dependencies\xtils\xtils\xtils.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="..\dependencies\cli-parser\cli-parser.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -230,6 +227,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\dependencies\vmprofiler\dependencies\zydis\msvc\ZydisExportConfig.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\dependencies\xtils\xtils.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

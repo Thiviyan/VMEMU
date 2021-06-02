@@ -123,7 +123,7 @@ namespace vm
 		if (uc) uc_close(uc);
 	}
 
-	bool emu_t::get_trace(std::vector<vmp2::entry_t>& entries)
+	bool emu_t::get_trace(std::vector<vmp2::v2::entry_t>& entries)
 	{
 		// hook_code will fill this vector up with values...
 		trace_entries = &entries;
@@ -139,7 +139,7 @@ namespace vm
 		return true;
 	}
 
-	uc_err emu_t::create_entry(vmp2::entry_t* entry)
+	uc_err emu_t::create_entry(vmp2::v2::entry_t* entry)
 	{
 		uc_reg_read(uc, UC_X86_REG_R15, &entry->regs.r15);
 		uc_reg_read(uc, UC_X86_REG_R14, &entry->regs.r14);
@@ -200,7 +200,7 @@ namespace vm
         if (address == obj->vm_entry[obj->vm_entry.size() - 1].addr)
 		{
 			uc_err err;
-			vmp2::entry_t new_entry;
+			vmp2::v2::entry_t new_entry;
 			if ((err = obj->create_entry(&new_entry)))
 			{
 				std::printf("[!] failed to create new entry... reason = %u, %s\n",
@@ -241,7 +241,7 @@ namespace vm
 				return;
 
 			uc_err err;
-			vmp2::entry_t new_entry;
+			vmp2::v2::entry_t new_entry;
 			if ((err = obj->create_entry(&new_entry)))
 			{
 				std::printf("[!] failed to create new entry... reason = %u, %s\n",
