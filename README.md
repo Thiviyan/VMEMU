@@ -29,6 +29,8 @@ First download the repo using `git clone --recursive https://githacks.org/vmp2/v
 
 Now that unicorn has been built, you can open ***vmemu.sln**. Select ***Release MT*** and ***x64***, then click ***Build*** --> ***Build Solution***. Now copy ***unicorn.dll** from ***dependencies/unicorn/msvc/x64/Release/unicorn.dll*** into ***x64/Release/***. You should now be able to open a command prompt inside of ***x64/Release/***, type `vmemu.exe -h`, if the help message is displayed then everything has worked.
 
+The reason for building unicorn outside of the vmemu solution is that unicorn has build scripts which create folders. These build scripts fail when they are in the wrong working directory. 
+
 # VMProtect 2 - Virtual Machine Architecture Overview
 
 ## vm_entry - an entry point into the vm
