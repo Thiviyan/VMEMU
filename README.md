@@ -27,7 +27,7 @@ Options:
 
 First download the repo using `git clone --recursive https://githacks.org/vmp2/vmemu.git`. Then navigate to ***dependencies*** --> ***unicorn*** --> ***msvc***. Open ***unicorn.sln***, select ***Release*** and ***x64*** on the top of Visual Studios, then click ***Build*** --> ***Build Solution***.
 
-Now that unicorn has been built, you can open ***vmemu.sln**. Select ***Release MT*** and ***x64***, then click ***Build*** --> ***Build Solution***. Now copy ***unicorn.dll** from ***dependencies/unicorn/msvc/x64/Release/unicorn.dll*** into ***x64/Release/***. You should now be able to open a command prompt inside of ***x64/Release/***, type `vmemu.exe -h`, if the help message is displayed then everything has worked.
+Now that unicorn has been built, you can open ***vmemu.sln**. Select ***Release MT*** and ***x64***, then click ***Build*** --> ***Build Solution***. Now copy ***unicorn.dll*** from ***dependencies/unicorn/msvc/x64/Release/unicorn.dll*** into ***x64/Release/***. You should now be able to open a command prompt inside of ***x64/Release/***, type `vmemu.exe -h`, if the help message is displayed then everything has worked.
 
 The reason for building unicorn outside of the vmemu solution is that unicorn has build scripts which create folders. These build scripts fail when they are in the wrong working directory. 
 
