@@ -76,11 +76,14 @@
     <ClInclude Include="..\dependencies\vmprofiler\include\vmp2.hpp" />
     <ClInclude Include="..\dependencies\vmprofiler\include\vmprofiler.hpp" />
     <ClInclude Include="..\dependencies\vmprofiler\include\vmutils.h" />
-    <ClInclude Include="..\dependencies\xtils\xtils\xtils.hpp" />
+    <ClInclude Include="..\dependencies\xtils\xtils.hpp" />
     <ClInclude Include="vmemu_t.hpp" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\dependencies\vmprofiler\src\vmprofiler.vcxproj">
+    <ProjectReference Include="..\dependencies\vmprofiler\dependencies\zydis\msvc\zydis\Zydis.vcxproj">
+      <Project>{88a23124-5640-35a0-b890-311d7a67a7d2}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\dependencies\vmprofiler\vmprofiler.vcxproj">
       <Project>{d0b6092a-9944-4f24-9486-4b7dae372619}</Project>
     </ProjectReference>
   </ItemGroup>
