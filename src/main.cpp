@@ -65,4 +65,14 @@ int __cdecl main( int argc, const char *argv[] )
         std::printf( "[!] something failed during tracing, review the console for more information...\n" );
 
     std::printf( "> number of blocks = %d\n", code_blocks.size() );
+    for ( auto &code_block : code_blocks )
+    {
+        std::printf( "> code block starts at = %p\n", code_block.vip_begin );
+        std::printf( "> number of virtual instructions = %d\n", code_block.vinstrs.size() );
+        std::printf( "> does this code block have a jcc? %s\n", code_block.jcc.has_jcc ? "yes" : "no" );
+
+        if ( code_block.jcc.has_jcc )
+            std::printf( "> branch 1 = %p, branch 2 = %p\n", code_block.jcc.block_rva[ 0 ],
+                         code_block.jcc.block_rva[ 1 ] );
+    }
 }
