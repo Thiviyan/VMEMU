@@ -85,6 +85,7 @@ namespace vm
     {
         uc_err err;
         code_blocks.push_back( { vm::instrs::code_block_t{ 0u }, {} } );
+
         if ( ( err = uc_emu_start( uc, vmctx->vm_entry_rva + vmctx->module_base, NULL, NULL, NULL ) ) )
         {
             std::printf( "failed on uc_emu_start() with error returned %u: %s\n", err, uc_strerror( err ) );
@@ -98,8 +99,17 @@ namespace vm
                    } ) != code_blocks.end();
         };
 
+        static const auto _traced_all_paths = [ & ]( const auto &code_blocks ) -> bool {
+            for ( const auto &[ code_block, cpu_context ] : code_blocks )
+                if ( code_block.jcc.has_jcc && ( !_already_traced( code_block.jcc.block_addr[ 0 ] ) ||
+                                                 !_already_traced( code_block.jcc.block_addr[ 1 ] ) ) )
+                    return false;
+            return true;
+        };
+
         static const auto _trace_branch = [ & ]( vm::instrs::code_block_t &code_block,
-                                                 std::shared_ptr< cpu_ctx > &context ) -> bool {
+                                                 std::shared_ptr< cpu_ctx > &context,
+                                                 std::uintptr_t branch_addr ) -> bool {
             if ( !context )
                 return {};
 
@@ -115,8 +125,7 @@ namespace vm
             // change the top qword on the stack to the branch rva...
             // the rva is image base'ed and only the bottom 32bits...
 
-            std::uintptr_t branch_rva =
-                ( ( code_block.jcc.block_addr[ 0 ] - vmctx->module_base ) + vmctx->image_base ) & 0xFFFFFFFFull;
+            std::uintptr_t branch_rva = ( ( branch_addr - vmctx->module_base ) + vmctx->image_base ) & 0xFFFFFFFFull;
 
             uc_mem_write( uc, code_block.vinstrs.back().trace_data.regs.rbp, &branch_rva, sizeof branch_rva );
             code_blocks.push_back( { vm::instrs::code_block_t{ 0u }, {} } );
@@ -130,15 +139,18 @@ namespace vm
             }
         };
 
-        for ( auto &[ code_block, uc_code_block_context ] : code_blocks )
+        while ( !_traced_all_paths( code_blocks ) )
         {
-            if ( code_block.jcc.has_jcc )
+            for ( auto &[ code_block, uc_code_block_context ] : code_blocks )
             {
-                if ( !_already_traced( code_block.jcc.block_addr[ 0 ] ) )
-                    _trace_branch( code_block, uc_code_block_context );
+                if ( code_block.jcc.has_jcc )
+                {
+                    if ( !_already_traced( code_block.jcc.block_addr[ 0 ] ) )
+                        _trace_branch( code_block, uc_code_block_context, code_block.jcc.block_addr[ 0 ] );
 
-                if ( !_already_traced( code_block.jcc.block_addr[ 1 ] ) )
-                    _trace_branch( code_block, uc_code_block_context );
+                    if ( !_already_traced( code_block.jcc.block_addr[ 1 ] ) )
+                        _trace_branch( code_block, uc_code_block_context, code_block.jcc.block_addr[ 1 ] );
+                }
             }
         }
 
@@ -249,7 +261,7 @@ namespace vm
 
             if ( !obj->code_blocks.back().first.vip_begin )
                 // -1 because the first byte is the opcode...
-                obj->code_blocks.back().first.vip_begin = new_entry.vip - 1; 
+                obj->code_blocks.back().first.vip_begin = new_entry.vip - 1;
 
             if ( virt_instr = vm::instrs::get( *obj->vmctx, new_entry ); !virt_instr.has_value() )
             {
@@ -292,6 +304,7 @@ namespace vm
                     exit( 0 );
                 }
 
+                // if the next code block has already been traced then stop emulation...
                 if ( auto already_traced = std::find_if( obj->code_blocks.begin(), obj->code_blocks.end(),
                                                          [ & ]( const auto &code_block_data ) -> bool {
                                                              return code_block_data.first.vip_begin ==
@@ -299,12 +312,10 @@ namespace vm
                                                          } );
                      already_traced != obj->code_blocks.end() )
                 {
-                    // stop tracing, dont step up the next code block since we already traced it...
                     uc_emu_stop( uc );
                 }
-                else
+                else // else set the next code block up...
                 {
-                    // set the next code block up...
                     obj->code_blocks.push_back( { vm::instrs::code_block_t{ 0u }, {} } );
                 }
             }
