@@ -227,7 +227,12 @@ namespace vm
             obj->trace_entries->push_back( new_entry );
         }
         else if ( instr.mnemonic == ZYDIS_MNEMONIC_RET ) // finish tracing...
+        {
             uc_emu_stop( uc );
+
+            std::printf( "> stopping at vmexit instruction...\n" );
+            std::getchar();
+        }
     }
 
     bool emu_t::hook_mem_invalid( uc_engine *uc, uc_mem_type type, uint64_t address, int size, int64_t value,

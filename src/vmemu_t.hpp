@@ -11,6 +11,45 @@
 
 namespace vm
 {
+    struct virt_instr_t
+    {
+        vm::handler::mnemonic_t mnemonic_t;
+        std::uint8_t opcode; // aka vm handler idx...
+
+        struct
+        {
+            bool has_imm;
+            struct
+            {
+                std::uint8_t imm_size; // size in bits...
+                union
+                {
+                    std::int64_t s;
+                    std::uint64_t u;
+                };
+            } imm;
+        } operand;
+    };
+
+    enum class jcc_type
+    {
+        none,
+        branching,
+        absolute
+    };
+
+    struct code_block_t
+    {
+        struct
+        {
+            bool has_jcc;
+            jcc_type type;
+            std::uint32_t branch_rva[ 2 ];
+        } jcc;
+
+        std::vector< virt_instr_t > vinstrs;
+    };
+
     class emu_t
     {
         using callback_t = std::function< void( uc_engine *, uint64_t, uint32_t, void * ) >;
