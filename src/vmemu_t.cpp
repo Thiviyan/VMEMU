@@ -178,25 +178,15 @@ namespace vm
             ZydisDecoderInit( &decoder, ZYDIS_MACHINE_MODE_LONG_64, ZYDIS_ADDRESS_WIDTH_64 );
         } );
 
-        // last instruction in vm_entry is jmp rcx/rdx...
-        if ( address == obj->vm_entry[ obj->vm_entry.size() - 1 ].addr )
+        if ( ZYAN_SUCCESS(
+                 ZydisDecoderDecodeBuffer( &decoder, reinterpret_cast< void * >( address ), size, &instr ) ) &&
+             instr.mnemonic == ZYDIS_MNEMONIC_JMP && instr.operands[ 0 ].type == ZYDIS_OPERAND_TYPE_REGISTER &&
+             instr.operands[ 0 ].reg.value == jmp_reg )
         {
             uc_err err;
             vmp2::v2::entry_t new_entry;
-            if ( ( err = obj->create_entry( &new_entry ) ) )
-            {
-                std::printf( "[!] failed to create new entry... reason = %u, %s\n", err, uc_strerror( err ) );
+            vm::handler::profile_t *vm_handler_profile = nullptr;
 
-                exit( 0 );
-            }
-            obj->trace_entries->push_back( new_entry );
-        }
-        // if we are getting a callback for a JMP RCX/RDX instruction...
-        else if ( ZYAN_SUCCESS(
-                      ZydisDecoderDecodeBuffer( &decoder, reinterpret_cast< void * >( address ), size, &instr ) ) &&
-                  instr.mnemonic == ZYDIS_MNEMONIC_JMP && instr.operands[ 0 ].type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                  instr.operands[ 0 ].reg.value == jmp_reg )
-        {
             switch ( jmp_reg )
             {
             case ZYDIS_REGISTER_RDX:
@@ -220,14 +210,20 @@ namespace vm
                  obj->vm_handlers.end() )
                 return;
 
-            uc_err err;
-            vmp2::v2::entry_t new_entry;
             if ( ( err = obj->create_entry( &new_entry ) ) )
             {
                 std::printf( "[!] failed to create new entry... reason = %u, %s\n", err, uc_strerror( err ) );
 
                 exit( 0 );
             }
+
+            if ( ( vm_handler_profile = obj->vm_handlers[ new_entry.handler_idx ].profile ) &&
+                 vm_handler_profile->mnemonic == vm::handler::mnemonic_t::JMP )
+            {
+                std::printf( "> stopping at virtual jump instruction...\n" );
+                std::getchar();
+            }
+
             obj->trace_entries->push_back( new_entry );
         }
         else if ( instr.mnemonic == ZYDIS_MNEMONIC_RET ) // finish tracing...
