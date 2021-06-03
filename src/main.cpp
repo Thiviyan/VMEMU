@@ -42,6 +42,12 @@ int __cdecl main( int argc, const char *argv[] )
 
     std::printf( "> image base = %p, image size = %p, module base = %p\n", image_base, image_size, module_base );
 
+    if (!image_base || !image_size || !module_base)
+    {
+        std::printf( "[!] failed to open binary on disk...\n" );
+        return -1;
+    }
+
     std::vector< vm::instrs::code_block_t > code_blocks;
     vm::ctx_t vmctx( module_base, image_base, image_size, vm_entry_rva );
 
