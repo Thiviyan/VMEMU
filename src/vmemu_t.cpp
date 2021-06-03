@@ -12,6 +12,7 @@ namespace vm
         std::uintptr_t stack_base = 0x1000000;
         std::uintptr_t stack_addr = ( stack_base + ( 0x1000 * 20 ) ) - 0x6000;
         const auto rip = vmctx->module_base + vmctx->vm_entry_rva;
+        const auto image_size = NT_HEADER( vmctx->module_base )->OptionalHeader.SizeOfImage;
 
         if ( ( err = uc_open( UC_ARCH_X86, UC_MODE_64, &uc ) ) )
         {
@@ -20,7 +21,7 @@ namespace vm
             return false;
         }
 
-        if ( ( err = uc_mem_map( uc, vmctx->module_base, vmctx->image_size, UC_PROT_ALL ) ) )
+        if ( ( err = uc_mem_map( uc, vmctx->module_base, image_size, UC_PROT_ALL ) ) )
         {
             std::printf( "failed on uc_mem_map() with error returned %u: %s\n", err, uc_strerror( err ) );
 
@@ -35,7 +36,7 @@ namespace vm
         }
 
         if ( ( err = uc_mem_write( uc, vmctx->module_base, reinterpret_cast< void * >( vmctx->module_base ),
-                                   vmctx->image_size ) ) )
+                                   image_size ) ) )
         {
             std::printf( "failed on uc_mem_write() with error returned %u: %s\n", err, uc_strerror( err ) );
 
@@ -210,8 +211,20 @@ namespace vm
                 if ( jcc.has_value() )
                     obj->code_blocks->back().jcc = jcc.value();
 
-                // set the next code block up...
-                obj->code_blocks->push_back( vm::instrs::code_block_t{ code_block_address } );
+                if ( auto already_traced = std::find_if( obj->code_blocks->begin(), obj->code_blocks->end(),
+                                                         [ & ]( const vm::instrs::code_block_t &code_block ) -> bool {
+                                                             return code_block.vip_begin == code_block_address;
+                                                         } );
+                     already_traced != obj->code_blocks->end() )
+                {
+                    // stop tracing, dont step up the next code block since we already traced it...
+                    uc_emu_stop( uc );
+                }
+                else
+                {
+                    // set the next code block up...
+                    obj->code_blocks->push_back( vm::instrs::code_block_t{ code_block_address } );
+                }
             }
         }
         else if ( instr.mnemonic == ZYDIS_MNEMONIC_RET ) // finish tracing...
