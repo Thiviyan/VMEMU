@@ -12,7 +12,6 @@ namespace vm
         std::uintptr_t stack_base = 0x1000000;
         std::uintptr_t stack_addr = ( stack_base + ( 0x1000 * 20 ) ) - 0x6000;
         const auto rip = vmctx->module_base + vmctx->vm_entry_rva;
-        const auto image_size = NT_HEADER( vmctx->module_base )->OptionalHeader.SizeOfImage;
 
         if ( ( err = uc_open( UC_ARCH_X86, UC_MODE_64, &uc ) ) )
         {
@@ -21,7 +20,7 @@ namespace vm
             return false;
         }
 
-        if ( ( err = uc_mem_map( uc, vmctx->module_base, image_size, UC_PROT_ALL ) ) )
+        if ( ( err = uc_mem_map( uc, vmctx->module_base, vmctx->image_size, UC_PROT_ALL ) ) )
         {
             std::printf( "failed on uc_mem_map() with error returned %u: %s\n", err, uc_strerror( err ) );
 
@@ -36,7 +35,7 @@ namespace vm
         }
 
         if ( ( err = uc_mem_write( uc, vmctx->module_base, reinterpret_cast< void * >( vmctx->module_base ),
-                                   image_size ) ) )
+                                   vmctx->image_size ) ) )
         {
             std::printf( "failed on uc_mem_write() with error returned %u: %s\n", err, uc_strerror( err ) );
 
@@ -137,6 +136,8 @@ namespace vm
 
                 return false;
             }
+
+            return true;
         };
 
         while ( !_traced_all_paths( code_blocks ) )
