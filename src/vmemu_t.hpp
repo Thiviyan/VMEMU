@@ -16,7 +16,7 @@ namespace vm
         using callback_t = std::function< void( uc_engine *, uint64_t, uint32_t, void * ) >;
 
       public:
-        explicit emu_t( std::uint32_t vm_entry_rva, std::uintptr_t image_base, std::uintptr_t module_base );
+        explicit emu_t( vm::ctx_t* vmctx );
         ~emu_t();
 
         bool init();
@@ -31,10 +31,7 @@ namespace vm
         uc_engine *uc;
         uc_hook trace, trace1;
 
-        std::uintptr_t image_base, module_base;
-        std::uint32_t vm_entry_rva;
-
-        vm::ctx_t* vmctx;
+        vm::ctx_t *vmctx;
         std::vector< vm::instrs::code_block_t > *code_blocks;
     };
 } // namespace vm

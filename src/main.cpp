@@ -8,7 +8,7 @@
 
 int __cdecl main( int argc, const char *argv[] )
 {
-    argparse::argument_parser_t parser( "VMEmu", "VMProtect 2 Static VM Handler Emulator" );
+    argparse::argument_parser_t parser( "VMEmu", "VMProtect 2 VM Handler Emulator" );
 
     parser.add_argument()
         .name( "--vmentry" )
@@ -36,43 +36,24 @@ int __cdecl main( int argc, const char *argv[] )
     auto umtils = xtils::um_t::get_instance();
     const auto vm_entry_rva = std::strtoull( parser.get< std::string >( "vmentry" ).c_str(), nullptr, 16 );
     const auto image_base = umtils->image_base( parser.get< std::string >( "vmpbin" ).c_str() );
+    const auto image_size = umtils->image_size( parser.get< std::string >( "vmpbin" ).c_str() );
     const auto module_base = reinterpret_cast< std::uintptr_t >(
         LoadLibraryExA( parser.get< std::string >( "vmpbin" ).c_str(), NULL, DONT_RESOLVE_DLL_REFERENCES ) );
 
-    zydis_routine_t vm_entry, calc_jmp;
-    if ( !vm::util::flatten( vm_entry, vm_entry_rva + module_base ) )
+    std::printf( "> image base = %p, image size = %p, module base = %p\n", image_base, image_size, module_base );
+
+    std::vector< vm::instrs::code_block_t > code_blocks;
+    vm::ctx_t vmctx( module_base, image_base, image_size, vm_entry_rva );
+
+    if ( !vmctx.init() )
     {
-        std::printf( "> failed to flatten vm entry...\n" );
+        std::printf( "[!] failed to init vmctx... this can be for many reasons..."
+                     " try validating your vm entry rva... make sure the binary is unpacked and is"
+                     "protected with VMProtect 2...\n" );
         return -1;
     }
 
-    vm::util::deobfuscate( vm_entry );
-    std::printf( "> flattened vm entry...\n" );
-    std::printf( "> deobfuscated vm entry...\n" );
-    std::printf( "==================================================================================\n" );
-    vm::util::print( vm_entry );
-
-    if ( !vm::calc_jmp::get( vm_entry, calc_jmp ) )
-    {
-        std::printf( "> failed to get calc_jmp...\n" );
-        return -1;
-    }
-
-    vm::util::deobfuscate( calc_jmp );
-    std::printf( "> calc_jmp extracted from vm_entry... calc_jmp:\n" );
-    std::printf( "==================================================================================\n" );
-    vm::util::print( calc_jmp );
-
-    const auto advancment = vm::calc_jmp::get_advancement( calc_jmp );
-
-    if ( !advancment.has_value() )
-    {
-        std::printf( "> failed to determine advancment...\n" );
-        return -1;
-    }
-
-    std::vector< vmp2::v2::entry_t > entries;
-    vm::emu_t emu( vm_entry_rva, image_base, module_base );
+    vm::emu_t emu( &vmctx );
 
     if ( !emu.init() )
     {
@@ -80,34 +61,8 @@ int __cdecl main( int argc, const char *argv[] )
         return -1;
     }
 
-    if ( !emu.get_trace( entries ) )
+    if ( !emu.get_trace( code_blocks ) )
         std::printf( "[!] something failed during tracing, review the console for more information...\n" );
 
-    std::printf( "> creating trace file...\n" );
-    std::printf( "> finished tracing... number of virtual instructions = %d\n", entries.size() );
-    std::ofstream output( parser.get< std::string >( "out" ), std::ios::binary );
-
-    vmp2::v2::file_header file_header;
-    memcpy( &file_header.magic, "VMP2", sizeof( "VMP2" ) - 1 );
-
-    file_header.epoch_time = time( nullptr );
-    file_header.entry_offset = sizeof file_header + NT_HEADER( module_base )->OptionalHeader.SizeOfImage;
-    file_header.entry_count = entries.size();
-    file_header.advancement = advancment.value();
-    file_header.image_base = image_base;
-    file_header.vm_entry_rva = vm_entry_rva;
-
-    file_header.version = vmp2::version_t::v2;
-    file_header.module_base = module_base;
-    file_header.module_offset = sizeof file_header;
-    file_header.module_size = umtils->image_size( parser.get< std::string >( "vmpbin" ).c_str() );
-
-    output.write( reinterpret_cast< const char * >( &file_header ), sizeof file_header );
-    output.write( reinterpret_cast< const char * >( module_base ), file_header.module_size );
-
-    for ( auto &entry : entries )
-        output.write( reinterpret_cast< const char * >( &entry ), sizeof entry );
-
-    output.close();
-    std::printf( "> finished writing trace to disk...\n" );
+    std::printf( "> number of blocks = %d\n", code_blocks.size() );
 }

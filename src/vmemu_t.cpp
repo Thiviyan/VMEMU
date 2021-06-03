@@ -2,9 +2,7 @@
 
 namespace vm
 {
-    emu_t::emu_t( std::uint32_t vm_entry_rva, std::uintptr_t image_base, std::uintptr_t module_base )
-        : module_base( module_base ), image_base( image_base ), vm_entry_rva( vm_entry_rva ), uc( nullptr ),
-          code_blocks( nullptr ), vmctx( new vm::ctx_t( module_base, image_base, vm_entry_rva ) )
+    emu_t::emu_t( vm::ctx_t *vmctx ) : uc( nullptr ), code_blocks( nullptr ), vmctx( vmctx )
     {
     }
 
@@ -13,8 +11,7 @@ namespace vm
         uc_err err;
         std::uintptr_t stack_base = 0x1000000;
         std::uintptr_t stack_addr = ( stack_base + ( 0x1000 * 20 ) ) - 0x6000;
-        const auto rip = module_base + vm_entry_rva;
-        const auto image_size = NT_HEADER( module_base )->OptionalHeader.SizeOfImage;
+        const auto rip = vmctx->module_base + vmctx->vm_entry_rva;
 
         if ( ( err = uc_open( UC_ARCH_X86, UC_MODE_64, &uc ) ) )
         {
@@ -23,7 +20,7 @@ namespace vm
             return false;
         }
 
-        if ( ( err = uc_mem_map( uc, module_base, image_size, UC_PROT_ALL ) ) )
+        if ( ( err = uc_mem_map( uc, vmctx->module_base, vmctx->image_size, UC_PROT_ALL ) ) )
         {
             std::printf( "failed on uc_mem_map() with error returned %u: %s\n", err, uc_strerror( err ) );
 
@@ -37,7 +34,8 @@ namespace vm
             return false;
         }
 
-        if ( ( err = uc_mem_write( uc, module_base, reinterpret_cast< void * >( module_base ), image_size ) ) )
+        if ( ( err = uc_mem_write( uc, vmctx->module_base, reinterpret_cast< void * >( vmctx->module_base ),
+                                   vmctx->image_size ) ) )
         {
             std::printf( "failed on uc_mem_write() with error returned %u: %s\n", err, uc_strerror( err ) );
 
@@ -58,8 +56,8 @@ namespace vm
             return false;
         }
 
-        if ( ( err = uc_hook_add( uc, &trace, UC_HOOK_CODE, &vm::emu_t::hook_code, this, module_base,
-                                  module_base + image_size ) ) )
+        if ( ( err = uc_hook_add( uc, &trace, UC_HOOK_CODE, &vm::emu_t::hook_code, this, vmctx->module_base,
+                                  vmctx->module_base + vmctx->image_size ) ) )
         {
             std::printf( "failed on uc_hook_add() with error returned %u: %s\n", err, uc_strerror( err ) );
 
@@ -80,8 +78,6 @@ namespace vm
     {
         if ( uc )
             uc_close( uc );
-
-        delete vmctx;
     }
 
     bool emu_t::get_trace( std::vector< vm::instrs::code_block_t > &entries )
@@ -90,7 +86,7 @@ namespace vm
         code_blocks = &entries;
         uc_err err;
 
-        if ( ( err = uc_emu_start( uc, vm_entry_rva + module_base, NULL, NULL, NULL ) ) )
+        if ( ( err = uc_emu_start( uc, vmctx->vm_entry_rva + vmctx->module_base, NULL, NULL, NULL ) ) )
         {
             std::printf( "failed on uc_emu_start() with error returned %u: %s\n", err, uc_strerror( err ) );
 
@@ -204,12 +200,15 @@ namespace vm
 
             obj->code_blocks->back().vinstrs.push_back( virt_instr.value() );
 
-            // if there is a virtual JMP instruction then we need to create a new code_block_t...
+            // if there is a virtual JMP instruction then we need to grab jcc data for the current code_block_t
+            // and then create a new code_block_t...
             if ( ( vm_handler_profile = obj->vmctx->vm_handlers[ new_entry.handler_idx ].profile ) &&
                  vm_handler_profile->mnemonic == vm::handler::mnemonic_t::JMP )
             {
-                const auto code_block_address =
-                    vm::instrs::code_block_addr( *obj->vmctx, new_entry, obj->image_base, obj->module_base );
+                const auto code_block_address = vm::instrs::code_block_addr( *obj->vmctx, new_entry );
+                auto jcc = vm::instrs::get_jcc_data( *obj->vmctx, obj->code_blocks->back() );
+                if ( jcc.has_value() )
+                    obj->code_blocks->back().jcc = jcc.value();
 
                 // set the next code block up...
                 obj->code_blocks->push_back( vm::instrs::code_block_t{ code_block_address } );
@@ -218,6 +217,8 @@ namespace vm
         else if ( instr.mnemonic == ZYDIS_MNEMONIC_RET ) // finish tracing...
         {
             uc_emu_stop( uc );
+            // vmexit's cannot have a branch...
+            obj->code_blocks->back().jcc.has_jcc = false;
         }
     }
 
