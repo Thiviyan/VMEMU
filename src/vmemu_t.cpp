@@ -2,7 +2,7 @@
 
 namespace vm
 {
-    emu_t::emu_t( vm::ctx_t *vmctx ) : uc( nullptr ), code_blocks( nullptr ), vmctx( vmctx )
+    emu_t::emu_t( vm::ctx_t *vmctx ) : uc( nullptr ), vmctx( vmctx )
     {
     }
 
@@ -28,7 +28,7 @@ namespace vm
             return false;
         }
 
-        if ( ( err = uc_mem_map( uc, 0x1000000, 0x1000 * 20, UC_PROT_ALL ) ) )
+        if ( ( err = uc_mem_map( uc, UC_STACK_ADDR, sizeof vm::cpu_ctx::stack, UC_PROT_ALL ) ) )
         {
             std::printf( "failed on uc_mem_map() with error returned %u: %s\n", err, uc_strerror( err ) );
 
@@ -83,16 +83,68 @@ namespace vm
 
     bool emu_t::get_trace( std::vector< vm::instrs::code_block_t > &entries )
     {
-        // hook_code will fill this vector up with values...
-        code_blocks = &entries;
         uc_err err;
-
+        code_blocks.push_back( { vm::instrs::code_block_t{ 0u }, {} } );
         if ( ( err = uc_emu_start( uc, vmctx->vm_entry_rva + vmctx->module_base, NULL, NULL, NULL ) ) )
         {
             std::printf( "failed on uc_emu_start() with error returned %u: %s\n", err, uc_strerror( err ) );
 
             return false;
         }
+
+        static const auto _already_traced = [ & ]( std::uintptr_t code_block_addr ) -> bool {
+            return std::find_if( code_blocks.begin(), code_blocks.end(), [ & ]( const auto code_block_data ) -> bool {
+                       return code_block_data.first.vip_begin == code_block_addr;
+                   } ) != code_blocks.end();
+        };
+
+        static const auto _trace_branch = [ & ]( vm::instrs::code_block_t &code_block,
+                                                 std::shared_ptr< cpu_ctx > &context ) -> bool {
+            if ( !context )
+                return {};
+
+            // restore context to virtual jmp... changing branch...
+            uc_context_restore( uc, context->context );
+
+            // restore entire stack....
+            uc_mem_write( uc, UC_STACK_ADDR, context->stack, sizeof vm::cpu_ctx::stack );
+
+            std::uintptr_t rip = 0u;
+            uc_reg_read( uc, UC_X86_REG_RIP, &rip );
+
+            // change the top qword on the stack to the branch rva...
+            // the rva is image base'ed and only the bottom 32bits...
+
+            std::uintptr_t branch_rva =
+                ( ( code_block.jcc.block_addr[ 0 ] - vmctx->module_base ) + vmctx->image_base ) & 0xFFFFFFFFull;
+
+            uc_mem_write( uc, code_block.vinstrs.back().trace_data.regs.rbp, &branch_rva, sizeof branch_rva );
+            code_blocks.push_back( { vm::instrs::code_block_t{ 0u }, {} } );
+
+            skip_current_jmp = true;
+            if ( ( err = uc_emu_start( uc, rip, NULL, NULL, NULL ) ) )
+            {
+                std::printf( "failed on uc_emu_start() with error returned %u: %s\n", err, uc_strerror( err ) );
+
+                return false;
+            }
+        };
+
+        for ( auto &[ code_block, uc_code_block_context ] : code_blocks )
+        {
+            if ( code_block.jcc.has_jcc )
+            {
+                if ( !_already_traced( code_block.jcc.block_addr[ 0 ] ) )
+                    _trace_branch( code_block, uc_code_block_context );
+
+                if ( !_already_traced( code_block.jcc.block_addr[ 1 ] ) )
+                    _trace_branch( code_block, uc_code_block_context );
+            }
+        }
+
+        for ( auto &[ code_block, uc_code_block_context ] : code_blocks )
+            entries.push_back( code_block );
+
         return true;
     }
 
@@ -135,6 +187,14 @@ namespace vm
     void emu_t::hook_code( uc_engine *uc, uint64_t address, uint32_t size, vm::emu_t *obj )
     {
         std::printf( ">>> Tracing instruction at 0x%p, instruction size = 0x%x\n", address, size );
+
+        // bad code... but i need to skip JMP instructions when tracing branches since i save context
+        // on the jmp instruction... so it needs to be skipped...
+        if ( obj->skip_current_jmp )
+        {
+            obj->skip_current_jmp = false;
+            return;
+        }
 
         // grab JMP RDX/RCX <-- this register...
         static const auto jmp_reg = obj->vmctx->vm_entry[ obj->vmctx->vm_entry.size() ].instr.operands[ 0 ].reg.value;
@@ -187,10 +247,9 @@ namespace vm
                 exit( 0 );
             }
 
-            // the first virtual instruction we are going to create the first code_block_t...
-            if ( static std::atomic< bool > once = true; once.exchange( false ) )
-                if ( obj->code_blocks->empty() )
-                    obj->code_blocks->push_back( vm::instrs::code_block_t{ new_entry.vip } );
+            if ( !obj->code_blocks.back().first.vip_begin )
+                // -1 because the first byte is the opcode...
+                obj->code_blocks.back().first.vip_begin = new_entry.vip - 1; 
 
             if ( virt_instr = vm::instrs::get( *obj->vmctx, new_entry ); !virt_instr.has_value() )
             {
@@ -199,7 +258,7 @@ namespace vm
                 exit( 0 );
             }
 
-            obj->code_blocks->back().vinstrs.push_back( virt_instr.value() );
+            obj->code_blocks.back().first.vinstrs.push_back( virt_instr.value() );
 
             // if there is a virtual JMP instruction then we need to grab jcc data for the current code_block_t
             // and then create a new code_block_t...
@@ -207,15 +266,38 @@ namespace vm
                  vm_handler_profile->mnemonic == vm::handler::mnemonic_t::JMP )
             {
                 const auto code_block_address = vm::instrs::code_block_addr( *obj->vmctx, new_entry );
-                auto jcc = vm::instrs::get_jcc_data( *obj->vmctx, obj->code_blocks->back() );
+                auto jcc = vm::instrs::get_jcc_data( *obj->vmctx, obj->code_blocks.back().first );
                 if ( jcc.has_value() )
-                    obj->code_blocks->back().jcc = jcc.value();
+                    obj->code_blocks.back().first.jcc = jcc.value();
 
-                if ( auto already_traced = std::find_if( obj->code_blocks->begin(), obj->code_blocks->end(),
-                                                         [ & ]( const vm::instrs::code_block_t &code_block ) -> bool {
-                                                             return code_block.vip_begin == code_block_address;
+                // save cpu state as well as stack...
+                obj->code_blocks.back().second = std::make_shared< cpu_ctx >();
+
+                if ( ( err = uc_context_alloc( uc, &obj->code_blocks.back().second->context ) ) )
+                {
+                    std::printf( "[!] failed to allocate context space...\n" );
+                    exit( 0 );
+                }
+
+                if ( ( err = uc_context_save( uc, obj->code_blocks.back().second->context ) ) )
+                {
+                    std::printf( "[!] failed to save cpu context...\n" );
+                    exit( 0 );
+                }
+
+                if ( ( err = uc_mem_read( uc, UC_STACK_ADDR, obj->code_blocks.back().second->stack,
+                                          sizeof vm::cpu_ctx::stack ) ) )
+                {
+                    std::printf( "[!] failed to read stack into backup buffer...\n" );
+                    exit( 0 );
+                }
+
+                if ( auto already_traced = std::find_if( obj->code_blocks.begin(), obj->code_blocks.end(),
+                                                         [ & ]( const auto &code_block_data ) -> bool {
+                                                             return code_block_data.first.vip_begin ==
+                                                                    code_block_address;
                                                          } );
-                     already_traced != obj->code_blocks->end() )
+                     already_traced != obj->code_blocks.end() )
                 {
                     // stop tracing, dont step up the next code block since we already traced it...
                     uc_emu_stop( uc );
@@ -223,7 +305,7 @@ namespace vm
                 else
                 {
                     // set the next code block up...
-                    obj->code_blocks->push_back( vm::instrs::code_block_t{ code_block_address } );
+                    obj->code_blocks.push_back( { vm::instrs::code_block_t{ 0u }, {} } );
                 }
             }
         }
@@ -231,7 +313,7 @@ namespace vm
         {
             uc_emu_stop( uc );
             // vmexit's cannot have a branch...
-            obj->code_blocks->back().jcc.has_jcc = false;
+            obj->code_blocks.back().first.jcc.has_jcc = false;
         }
     }
 

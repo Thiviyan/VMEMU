@@ -72,7 +72,7 @@ int __cdecl main( int argc, const char *argv[] )
         std::printf( "> does this code block have a jcc? %s\n", code_block.jcc.has_jcc ? "yes" : "no" );
 
         if ( code_block.jcc.has_jcc )
-            std::printf( "> branch 1 = %p, branch 2 = %p\n", code_block.jcc.block_rva[ 0 ],
-                         code_block.jcc.block_rva[ 1 ] );
+            std::printf( "> branch 1 = %p, branch 2 = %p\n", code_block.jcc.block_addr[ 0 ],
+                         code_block.jcc.block_addr[ 1 ] );
     }
 }
