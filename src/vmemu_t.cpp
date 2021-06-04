@@ -94,16 +94,25 @@ namespace vm
 
         static const auto _already_traced = [ & ]( std::uintptr_t code_block_addr ) -> bool {
             return std::find_if( code_blocks.begin(), code_blocks.end(), [ & ]( const auto code_block_data ) -> bool {
-                       return code_block_data.first.vip_begin == code_block_addr;
+                       return code_block_data.first.vip_begin == code_block_addr ||
+                              // sometimes the code block address is displaced by 1... and another byte for the
+                              // opcode...
+                              code_block_data.first.vip_begin == code_block_addr - 2 ||
+                              code_block_data.first.vip_begin == code_block_addr - 1;
                    } ) != code_blocks.end();
         };
 
-        static const auto _traced_all_paths = [ & ]( const auto &code_blocks ) -> bool {
-            for ( const auto &[ code_block, cpu_context ] : code_blocks )
-                if ( code_block.jcc.has_jcc && ( !_already_traced( code_block.jcc.block_addr[ 0 ] ) ||
-                                                 !_already_traced( code_block.jcc.block_addr[ 1 ] ) ) )
-                    return false;
-            return true;
+        static const auto _traced_all_paths =
+            [ & ]( const std::vector< std::pair< vm::instrs::code_block_t, std::shared_ptr< cpu_ctx > > > &code_blocks )
+            -> bool {
+            return std::find_if(
+                       code_blocks.begin(), code_blocks.end(),
+                       []( const std::pair< vm::instrs::code_block_t, std::shared_ptr< cpu_ctx > > &code_block_data )
+                           -> bool {
+                           return code_block_data.first.jcc.has_jcc &&
+                                  ( !_already_traced( code_block_data.first.jcc.block_addr[ 0 ] ) ||
+                                    !_already_traced( code_block_data.first.jcc.block_addr[ 1 ] ) );
+                       } ) == code_blocks.end();
         };
 
         static const auto _trace_branch = [ & ]( vm::instrs::code_block_t &code_block,
@@ -123,7 +132,6 @@ namespace vm
 
             // change the top qword on the stack to the branch rva...
             // the rva is image base'ed and only the bottom 32bits...
-
             std::uintptr_t branch_rva = ( ( branch_addr - vmctx->module_base ) + vmctx->image_base ) & 0xFFFFFFFFull;
 
             uc_mem_write( uc, code_block.vinstrs.back().trace_data.regs.rbp, &branch_rva, sizeof branch_rva );
