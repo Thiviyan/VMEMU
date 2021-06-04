@@ -9,18 +9,26 @@
 #include <vmprofiler.hpp>
 #include <xtils.hpp>
 
+#define UC_STACK_ADDR 0x1000000
+
 namespace vm
 {
+    struct cpu_ctx
+    {
+        uc_context *context;
+        std::uint8_t stack[ PAGE_4K * 20 ];
+    };
+
     class emu_t
     {
         using callback_t = std::function< void( uc_engine *, uint64_t, uint32_t, void * ) >;
 
       public:
-        explicit emu_t( std::uint32_t vm_entry_rva, std::uintptr_t image_base, std::uintptr_t module_base );
+        explicit emu_t( vm::ctx_t *vmctx );
         ~emu_t();
 
         bool init();
-        bool get_trace( std::vector< vmp2::v2::entry_t > &entries );
+        bool get_trace( std::vector< vm::instrs::code_block_t > &entries );
 
       private:
         uc_err create_entry( vmp2::v2::entry_t *entry );
@@ -31,12 +39,8 @@ namespace vm
         uc_engine *uc;
         uc_hook trace, trace1;
 
-        std::uintptr_t image_base, module_base;
-        std::uint32_t vm_entry_rva;
-
-        zydis_routine_t vm_entry;
-        std::uintptr_t *vm_handler_table;
-        std::vector< vm::handler::handler_t > vm_handlers;
-        std::vector< vmp2::v2::entry_t > *trace_entries;
+        bool skip_current_jmp;
+        vm::ctx_t *vmctx;
+        std::vector< std::pair< vm::instrs::code_block_t, std::shared_ptr<cpu_ctx> > > code_blocks;
     };
 } // namespace vm
