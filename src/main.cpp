@@ -111,6 +111,7 @@ int __cdecl main( int argc, const char *argv[] )
         _code_block->vip_begin = code_block.vip_begin;
         _code_block->jcc = code_block.jcc;
         _code_block->next_block_offset = _code_block_size;
+        _code_block->vinstr_count = code_block.vinstrs.size();
 
         for ( auto idx = 0u; idx < code_block.vinstrs.size(); ++idx )
             _code_block->vinstr[ idx ] = code_block.vinstrs[ idx ];
