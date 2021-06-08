@@ -16,7 +16,7 @@ namespace vm
     struct cpu_ctx
     {
         uc_context *context;
-        std::uint8_t stack[ PAGE_4K * 20 ];
+        std::uint8_t stack[ PAGE_4K * 100 ];
     };
 
     class emu_t

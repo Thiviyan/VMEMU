@@ -89,9 +89,6 @@ namespace vm
         {
             std::printf( "failed on uc_emu_start() with error returned %u: %s\n", err, uc_strerror( err ) );
 
-            for ( auto &[ code_block, uc_code_block_context ] : code_blocks )
-                entries.push_back( code_block );
-
             return false;
         }
 
@@ -208,7 +205,8 @@ namespace vm
 
     void emu_t::hook_code( uc_engine *uc, uint64_t address, uint32_t size, vm::emu_t *obj )
     {
-        std::printf( ">>> Tracing instruction at 0x%p, instruction size = 0x%x\n", address, size );
+        // std::printf( ">>> Tracing instruction at 0x%p, instruction size = 0x%x\n",
+        //( address - obj->vmctx->module_base ) + obj->vmctx->image_base, size );
 
         // bad code... but i need to skip JMP instructions when tracing branches since i save context
         // on the jmp instruction... so it needs to be skipped...
@@ -223,7 +221,7 @@ namespace vm
 
         static ZydisDecoder decoder;
         static ZydisDecodedInstruction instr;
-        static std::uintptr_t reg_val = 0u;
+        static std::uintptr_t reg_val = 0u, rsi = 0u;
 
         // init zydis decoder only a single time...
         if ( static std::atomic< bool > once = true; once.exchange( false ) )
@@ -281,6 +279,13 @@ namespace vm
             }
 
             obj->code_blocks.back().first.vinstrs.push_back( virt_instr.value() );
+            uc_reg_read( obj->uc, UC_X86_REG_RSI, &rsi );
+            std::printf( "> %s handler = 0x%p vip = 0x%p\n",
+                         obj->vmctx->vm_handlers[ new_entry.handler_idx ].profile
+                             ? obj->vmctx->vm_handlers[ new_entry.handler_idx ].profile->name
+                             : "UNK",
+                         ( reg_val - obj->vmctx->module_base ) + obj->vmctx->image_base,
+                         ( rsi - obj->vmctx->module_base ) + obj->vmctx->image_base );
 
             // if there is a virtual JMP instruction then we need to grab jcc data for the current code_block_t
             // and then create a new code_block_t...
@@ -289,8 +294,16 @@ namespace vm
             {
                 const auto code_block_address = vm::instrs::code_block_addr( *obj->vmctx, new_entry );
                 auto jcc = vm::instrs::get_jcc_data( *obj->vmctx, obj->code_blocks.back().first );
+
                 if ( jcc.has_value() )
+                {
                     obj->code_blocks.back().first.jcc = jcc.value();
+                }
+                else // the branch(s) dont start with SREGQ... stopping...
+                {
+                    uc_emu_stop( uc );
+                    return;
+                }
 
                 // save cpu state as well as stack...
                 obj->code_blocks.back().second = std::make_shared< cpu_ctx >();
@@ -335,6 +348,11 @@ namespace vm
             uc_emu_stop( uc );
             // vmexit's cannot have a branch...
             obj->code_blocks.back().first.jcc.has_jcc = false;
+        }
+        else if ( instr.mnemonic == ZYDIS_MNEMONIC_CALL && instr.operands[ 0 ].type == ZYDIS_OPERAND_TYPE_REGISTER )
+        {
+            const auto rip = address + instr.length;
+            uc_reg_write( obj->uc, UC_X86_REG_RIP, &rip );
         }
     }
 
