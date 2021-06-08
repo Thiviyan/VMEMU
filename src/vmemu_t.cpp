@@ -89,6 +89,9 @@ namespace vm
         {
             std::printf( "failed on uc_emu_start() with error returned %u: %s\n", err, uc_strerror( err ) );
 
+            for ( auto &[ code_block, uc_code_block_context ] : code_blocks )
+                entries.push_back( code_block );
+
             return false;
         }
 
@@ -141,10 +144,8 @@ namespace vm
             if ( ( err = uc_emu_start( uc, rip, NULL, NULL, NULL ) ) )
             {
                 std::printf( "failed on uc_emu_start() with error returned %u: %s\n", err, uc_strerror( err ) );
-
                 return false;
             }
-
             return true;
         };
 
