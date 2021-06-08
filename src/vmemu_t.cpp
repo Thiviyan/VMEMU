@@ -83,7 +83,7 @@ namespace vm
     bool emu_t::get_trace( std::vector< vm::instrs::code_block_t > &entries )
     {
         uc_err err;
-        code_blocks.push_back( { vm::instrs::code_block_t{ 0u }, {} } );
+        code_blocks.push_back( { vm::instrs::code_block_t{ 0u }, { nullptr } } );
 
         if ( ( err = uc_emu_start( uc, vmctx->vm_entry_rva + vmctx->module_base, NULL, NULL, NULL ) ) )
         {
@@ -135,7 +135,7 @@ namespace vm
             std::uintptr_t branch_rva = ( ( branch_addr - vmctx->module_base ) + vmctx->image_base ) & 0xFFFFFFFFull;
 
             uc_mem_write( uc, code_block.vinstrs.back().trace_data.regs.rbp, &branch_rva, sizeof branch_rva );
-            code_blocks.push_back( { vm::instrs::code_block_t{ 0u }, {} } );
+            code_blocks.push_back( { vm::instrs::code_block_t{ 0u }, { nullptr } } );
 
             skip_current_jmp = true;
             if ( ( err = uc_emu_start( uc, rip, NULL, NULL, NULL ) ) )
@@ -153,10 +153,16 @@ namespace vm
                 if ( code_block.jcc.has_jcc )
                 {
                     if ( !_already_traced( code_block.jcc.block_addr[ 0 ] ) )
+                    {
                         _trace_branch( code_block, uc_code_block_context, code_block.jcc.block_addr[ 0 ] );
+                        break;
+                    }
 
                     if ( !_already_traced( code_block.jcc.block_addr[ 1 ] ) )
+                    {
                         _trace_branch( code_block, uc_code_block_context, code_block.jcc.block_addr[ 1 ] );
+                        break;
+                    }
                 }
             }
         }
@@ -270,6 +276,13 @@ namespace vm
             if ( !obj->code_blocks.back().first.vip_begin )
                 // -1 because the first byte is the opcode...
                 obj->code_blocks.back().first.vip_begin = new_entry.vip - 1;
+
+            if ( obj->code_blocks.back().first.vinstrs.size() > 500 )
+            {
+                obj->code_blocks.back().first.jcc.has_jcc = false;
+                uc_emu_stop( obj->uc );
+                return;
+            }
 
             if ( virt_instr = vm::instrs::get( *obj->vmctx, new_entry ); !virt_instr.has_value() )
             {
