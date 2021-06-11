@@ -1,9 +1,9 @@
+#define NOMINMAX
 #include <cli-parser.hpp>
 #include <fstream>
 #include <iostream>
 #include <unicorn/unicorn.h>
 #include <xtils.hpp>
-
 #include "vmemu_t.hpp"
 
 int __cdecl main( int argc, const char *argv[] )
