@@ -6,9 +6,7 @@
 
 # VMEmu - Virtual Machine Handler Emulation
 
-VMEmu uses unicorn to emulate x86_64 instructions which make up the virtual machine handlers. This project is extremely simple in that it will check every executed instruction in order to find any `JMP` instruction which uses a register and jumps to a vm handler. When this JMP is executed all native registers, virtual scratch registers, and the virtual stack are saved into a trace entry. Emulation ends when a VMEXIT instruction is found. This project supports multi-code path virtual instruction code and will discover all code paths.
-
-You can continue the analysis using IDA outside of the virtual machine and then use VMEmu again once execution enters back into the virtual machine. I have plans to turn this into a library and inherit this library into `vmprofiler-qt` and make a split view where you can see what native instructions are executed prior to the next vm entry. However for now this project is used to generate vmtrace files which `vmprofiler-qt` can parse.
+VMEmu uses unicorn to emulate x86_64 instructions which make up the virtual machine handlers. This project is extremely simple in that it will check every executed instruction in order to find any `JMP` instruction which uses a register and jumps to a vm handler. When this JMP is executed all native registers, virtual scratch registers, and the virtual stack are saved into a trace entry. Emulation ends when a VMEXIT instruction is found. This project supports multi-code path virtual instruction code and will discover all code paths. You can continue the analysis using IDA outside of the virtual machine and then use VMEmu again once execution enters back into the virtual machine. 
 
 # Restrictions 
 
