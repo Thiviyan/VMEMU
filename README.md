@@ -10,7 +10,12 @@ VMEmu uses unicorn to emulate x86_64 instructions which make up the virtual mach
 
 You can continue the analysis using IDA outside of the virtual machine and then use VMEmu again once execution enters back into the virtual machine. I have plans to turn this into a library and inherit this library into `vmprofiler-qt` and make a split view where you can see what native instructions are executed prior to the next vm entry. However for now this project is used to generate vmtrace files which `vmprofiler-qt` can parse.
 
-# ***Warning, Dumped Modules Are Not Supported At The Moment...***
+# Restrictions 
+
+* dumped modules are not supported at the moment as a "dump" can mean many things
+    * I.E: does the dump have a pe header? are the sections of the dump mapped back to file offset manner?
+    * does the dump file have relocations fixed?
+* Only x86_64 PE files are supported, support for ELF can be added later, no support for x86 will be added.
 
 # Usage - Creating A Trace
 
