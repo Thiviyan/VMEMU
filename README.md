@@ -10,6 +10,8 @@ VMEmu uses unicorn to emulate x86_64 instructions which make up the virtual mach
 
 You can continue the analysis using IDA outside of the virtual machine and then use VMEmu again once execution enters back into the virtual machine. I have plans to turn this into a library and inherit this library into `vmprofiler-qt` and make a split view where you can see what native instructions are executed prior to the next vm entry. However for now this project is used to generate vmtrace files which `vmprofiler-qt` can parse.
 
+# ***Warning, Dumped Modules Are Not Supported At The Moment...***
+
 # Usage - Creating A Trace
 
 In order to use VMEmu you must have an unpacked VMProtect 2 binary which you know some basic information about. 
@@ -22,8 +24,6 @@ Options:
     --out                  output file name for trace file... (Required)
     -h, --help             Shows this page
 ```
-
-# ***Warning, Dumped Modules Are Not Supported At The Moment...***
 
 # Building Instructions
 
