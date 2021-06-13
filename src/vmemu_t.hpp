@@ -1,4 +1,5 @@
 #pragma once
+#define NOMINMAX
 #include <Zydis/Zydis.h>
 #include <cstdint>
 #include <exception>
