@@ -23,6 +23,8 @@ Options:
     -h, --help             Shows this page
 ```
 
+# ***Warning, Dumped Modules Are Not Supported At The Moment...***
+
 # Building Instructions
 
 First download the repo using `git clone --recursive https://githacks.org/vmp2/vmemu.git`. Then navigate to ***dependencies*** --> ***unicorn*** --> ***msvc***. Open ***unicorn.sln***, select ***Release*** and ***x64*** on the top of Visual Studios, then click ***Build*** --> ***Build Solution***.
