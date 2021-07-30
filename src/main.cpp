@@ -1,10 +1,10 @@
-#define NOMINMAX
+#include <unicorn/unicorn.h>
+#include "vmemu_t.hpp"
+
 #include <cli-parser.hpp>
 #include <fstream>
 #include <iostream>
-#include <unicorn/unicorn.h>
 #include <xtils.hpp>
-#include "vmemu_t.hpp"
 
 int __cdecl main( int argc, const char *argv[] )
 {
@@ -15,8 +15,9 @@ int __cdecl main( int argc, const char *argv[] )
         .required( true )
         .description( "relative virtual address to a vm entry..." );
 
-    parser.add_argument().name( "--vmpbin" ).required( true ).description( "path to unpacked virtualized binary..." );
+    parser.add_argument().name( "--bin" ).required( true ).description( "path to unpacked virtualized binary..." );
     parser.add_argument().name( "--out" ).required( true ).description( "output file name for trace file..." );
+    parser.add_argument().name( "--unpack" ).description( "unpack a vmp2 binary..." );
 
     parser.enable_help();
     auto result = parser.parse( argc, argv );
@@ -72,6 +73,7 @@ int __cdecl main( int argc, const char *argv[] )
         std::printf( "[!] something failed during tracing, review the console for more information...\n" );
 
     std::printf( "> number of blocks = %d\n", code_blocks.size() );
+
     for ( auto &code_block : code_blocks )
     {
         std::printf( "> code block starts at = %p\n", code_block.vip_begin );
