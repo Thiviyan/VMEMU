@@ -115,8 +115,6 @@ namespace engine
             }
         }
 
-        *reinterpret_cast< std::uintptr_t * >( map_bin.data() + 0x599038 ) = LOAD_LIBRARY_VECTOR + IAT_VECTOR_TABLE;
-
         // map the entire map buffer into unicorn-engine since we have set everything else up...
         if ( ( err = uc_mem_write( uc_ctx, img_base, map_bin.data(), map_bin.size() ) ) )
         {
@@ -372,7 +370,7 @@ namespace engine
                 uc_reg_read( uc, UC_X86_REG_RAX, &rax );
                 uc_reg_read( uc, UC_X86_REG_RIP, &rip );
 
-                if ( rax > unpack->img_base + unpack->img_size )
+                if ( rax > unpack->img_base + unpack->img_size ) // skip calls to kernel32.dll...
                 {
                     rip += instr.length;
                     uc_reg_write( uc, UC_X86_REG_RIP, &rip );
