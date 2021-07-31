@@ -2,7 +2,8 @@
 
 namespace engine
 {
-    unpack_t::unpack_t( const std::vector< std::uint8_t > &packed_bin ) : bin( packed_bin ), uc_ctx( nullptr )
+    unpack_t::unpack_t( const std::vector< std::uint8_t > &packed_bin )
+        : bin( packed_bin ), uc_ctx( nullptr ), heap_offset( 0ull ), pack_section_offset( 0ull )
     {
         win_img = reinterpret_cast< win::image_t<> * >( bin.data() );
         img_base = win_img->get_nt_headers()->optional_header.image_base;
@@ -68,15 +69,9 @@ namespace engine
         win::section_header_t *sec_begin = win_img->get_nt_headers()->get_sections(),
                               *sec_end = sec_begin + win_img->get_nt_headers()->file_header.num_sections;
 
-        // map sections...
         std::for_each( sec_begin, sec_end, [ & ]( const win::section_header_t &sec_header ) {
             memcpy( map_bin.data() + sec_header.virtual_address, bin.data() + sec_header.ptr_raw_data,
                     sec_header.size_raw_data );
-
-            std::printf(
-                "> mapped section = %s, virt address = 0x%p, virt size = 0x%x, phys offset = 0x%x, phys size = 0x%x\n",
-                sec_header.name.to_string().data(), sec_header.virtual_address, sec_header.virtual_size,
-                sec_header.ptr_raw_data, sec_header.size_raw_data );
         } );
 
         auto basereloc_dir = win_img->get_directory( win::directory_id::directory_entry_basereloc );
@@ -110,8 +105,8 @@ namespace engine
                   win_img->get_directory( win::directory_id::directory_entry_import )->rva + map_bin.data() );
               import_dir->rva_name; ++import_dir )
         {
-            for ( auto iat_thunk = reinterpret_cast< win::image_thunk_data_t<> * >(
-                      import_dir->rva_original_first_thunk + map_bin.data() );
+            for ( auto iat_thunk =
+                      reinterpret_cast< win::image_thunk_data_t<> * >( import_dir->rva_first_thunk + map_bin.data() );
                   iat_thunk->address; ++iat_thunk )
             {
                 auto iat_name = reinterpret_cast< win::image_named_import_t * >( iat_thunk->address + map_bin.data() );
@@ -119,6 +114,8 @@ namespace engine
                     iat_thunk->function = iat_hooks[ iat_name->name ].first + IAT_VECTOR_TABLE;
             }
         }
+
+        *reinterpret_cast< std::uintptr_t * >( map_bin.data() + 0x599038 ) = LOAD_LIBRARY_VECTOR + IAT_VECTOR_TABLE;
 
         // map the entire map buffer into unicorn-engine since we have set everything else up...
         if ( ( err = uc_mem_write( uc_ctx, img_base, map_bin.data(), map_bin.size() ) ) )
@@ -140,7 +137,8 @@ namespace engine
 
         uc_hooks.push_back( new uc_hook );
         if ( ( err = uc_hook_add( uc_ctx, uc_hooks.back(),
-                                  UC_HOOK_MEM_READ_UNMAPPED | UC_HOOK_MEM_WRITE_UNMAPPED | UC_HOOK_MEM_FETCH_UNMAPPED,
+                                  UC_HOOK_MEM_READ_UNMAPPED | UC_HOOK_MEM_WRITE_UNMAPPED | UC_HOOK_MEM_FETCH_UNMAPPED |
+                                      UC_HOOK_INSN_INVALID,
                                   &engine::unpack_t::invalid_mem, this, true, false ) ) )
         {
             std::printf( "> uc_hook_add error, reason = %d\n", err );
@@ -150,10 +148,10 @@ namespace engine
         // execution break points on all sections that are executable but have no physical size on disk...
         std::for_each( sec_begin, sec_end, [ & ]( win::section_header_t &header ) {
             if ( !header.ptr_raw_data && !header.size_raw_data && header.characteristics.mem_execute &&
-                 !header.is_discardable() )
+                 header.characteristics.mem_write && !header.is_discardable() )
             {
                 uc_hooks.push_back( new uc_hook );
-                if ( ( err = uc_hook_add( uc_ctx, uc_hooks.back(), UC_HOOK_CODE,
+                if ( ( err = uc_hook_add( uc_ctx, uc_hooks.back(), UC_HOOK_CODE | UC_HOOK_MEM_WRITE,
                                           &engine::unpack_t::unpack_section_callback, this,
                                           header.virtual_address + img_base,
                                           header.virtual_address + header.virtual_size + img_base ) ) )
@@ -162,6 +160,7 @@ namespace engine
                     return false;
                 }
 
+                pack_section_offset = header.virtual_address + header.virtual_size;
                 std::printf( "> adding unpack watch on section = %s\n", header.name.to_string().data() );
             }
             else if ( header.characteristics.mem_execute )
@@ -201,29 +200,139 @@ namespace engine
         }
 
         std::printf( "> beginning execution at = 0x%p\n", rip );
+
         if ( ( err = uc_emu_start( uc_ctx, rip, 0ull, 0ull, 0ull ) ) )
         {
             std::printf( "> error starting emu... reason = %d\n", err );
             return false;
         }
 
+        output.resize( img_size );
+        if ( ( err = uc_mem_read( uc_ctx, img_base, output.data(), output.size() ) ) )
+        {
+            std::printf( "> uc_mem_read failed... err = %d\n", err );
+            return false;
+        }
+
+        auto img = reinterpret_cast< win::image_t<> * >( output.data() );
+        auto sections = img->get_nt_headers()->get_sections();
+        auto section_cnt = img->get_file_header()->num_sections;
+
+        std::for_each( sections, sections + section_cnt, [ & ]( win::section_header_t &header ) {
+            header.ptr_raw_data = header.virtual_address;
+            header.size_raw_data = header.virtual_size;
+        } );
         return true;
     }
 
-    void unpack_t::alloc_pool_hook( uc_engine *uc_ctx )
+    void unpack_t::alloc_pool_hook( uc_engine *uc_ctx, unpack_t *obj )
     {
+        // TODO
     }
 
-    void unpack_t::free_pool_hook( uc_engine *uc_ctx )
+    void unpack_t::free_pool_hook( uc_engine *uc_ctx, unpack_t *obj )
     {
+        // TODO
     }
 
-    void unpack_t::local_alloc_hook( uc_engine *uc_ctx )
+    void unpack_t::local_alloc_hook( uc_engine *uc_ctx, unpack_t *obj )
     {
+        uc_err err;
+        std::uintptr_t rax, rdx;
+
+        if ( ( err = uc_reg_read( uc_ctx, UC_X86_REG_RDX, &rdx ) ) )
+        {
+            std::printf( "> failed to read RDX... reason = %d\n", rdx );
+            return;
+        }
+
+        auto size = ( ( rdx + PAGE_4KB ) & ~0xFFFull );
+        if ( ( err = uc_mem_map( uc_ctx, HEAP_BASE + obj->heap_offset, size, UC_PROT_ALL ) ) )
+        {
+            std::printf( "> failed to allocate memory... reason = %d\n", err );
+            return;
+        }
+
+        rax = HEAP_BASE + obj->heap_offset;
+        obj->heap_offset += size;
+
+        if ( ( err = uc_reg_write( uc_ctx, UC_X86_REG_RAX, &rax ) ) )
+        {
+            std::printf( "> failed to write rax... reason = %d\n", err );
+            return;
+        }
     }
 
-    void unpack_t::local_free_hook( uc_engine *uc_ctx )
+    void unpack_t::local_free_hook( uc_engine *uc_ctx, unpack_t *obj )
     {
+        // TODO
+    }
+
+    void unpack_t::load_library_hook( uc_engine *uc_ctx, unpack_t *obj )
+    {
+        uc_err err;
+        std::uintptr_t rcx = 0ull;
+
+        if ( ( err = uc_reg_read( uc_ctx, UC_X86_REG_RCX, &rcx ) ) )
+        {
+            std::printf( "> uc_reg_read error, reason = %d\n", err );
+            return;
+        }
+
+        char buff[ 256 ];
+        uc_strcpy( uc_ctx, buff, rcx );
+        std::printf( "> LoadLibraryA(\"%s\")\n", buff );
+
+        auto module_base = reinterpret_cast< std::uintptr_t >( LoadLibraryA( buff ) );
+
+        auto module_size =
+            reinterpret_cast< win::image_t<> * >( module_base )->get_nt_headers()->optional_header.size_image;
+
+        if ( std::find( obj->loaded_modules.begin(), obj->loaded_modules.end(), module_base ) !=
+             obj->loaded_modules.end() )
+        {
+            if ( ( err = uc_reg_write( uc_ctx, UC_X86_REG_RAX, &module_base ) ) )
+            {
+                std::printf( "> failed to set rax... reason = %d\n", err );
+                return;
+            }
+        }
+        else
+        {
+            if ( ( err = uc_mem_map( uc_ctx, module_base, module_size, UC_PROT_ALL ) ) )
+            {
+                std::printf( "> failed to load library... reason = %d\n", err );
+                return;
+            }
+
+            if ( ( err = uc_mem_write( uc_ctx, module_base, reinterpret_cast< void * >( module_base ), module_size ) ) )
+            {
+                std::printf( "> failed to copy module into emulator... reason = %d\n", err );
+                return;
+            }
+
+            if ( ( err = uc_reg_write( uc_ctx, UC_X86_REG_RAX, &module_base ) ) )
+            {
+                std::printf( "> failed to set rax... reason = %d\n", err );
+                return;
+            }
+
+            obj->loaded_modules.push_back( module_base );
+        }
+    }
+
+    void unpack_t::uc_strcpy( uc_engine *uc_ctx, char *buff, std::uintptr_t addr )
+    {
+        uc_err err;
+        char i = 0u;
+        auto idx = 0ul;
+
+        do
+        {
+            if ( ( err = uc_mem_read( uc_ctx, addr + idx, &i, sizeof i ) ) )
+                break;
+
+        } while ( ( buff[ idx++ ] = i ) );
     }
 
     bool unpack_t::iat_dispatcher( uc_engine *uc, uint64_t address, uint32_t size, unpack_t *unpack )
@@ -234,7 +343,7 @@ namespace engine
             if ( iat_hook_data.first == vec )
             {
                 std::printf( "> hooking import = %s\n", iat_name.c_str() );
-                iat_hook_data.second( uc );
+                iat_hook_data.second( uc, unpack );
                 return true;
             }
         }
@@ -256,19 +365,33 @@ namespace engine
         auto instr_ptr = reinterpret_cast< void * >( unpack->map_bin.data() + ( address - unpack->img_base ) );
         if ( ZYAN_SUCCESS( ZydisDecoderDecodeBuffer( &decoder, instr_ptr, PAGE_4KB, &instr ) ) )
         {
-            char buffer[ 0x1000 ];
-            ZydisFormatterFormatInstruction( &formatter, &instr, buffer, sizeof( buffer ), address );
-            std::printf( "> 0x%p ", address );
-            puts( buffer );
+            if ( instr.mnemonic == ZYDIS_MNEMONIC_CALL && instr.operands[ 0 ].type == ZYDIS_OPERAND_TYPE_REGISTER &&
+                 instr.operands[ 0 ].reg.value == ZYDIS_REGISTER_RAX )
+            {
+                std::uintptr_t rax = 0u, rip = 0u;
+                uc_reg_read( uc, UC_X86_REG_RAX, &rax );
+                uc_reg_read( uc, UC_X86_REG_RIP, &rip );
+
+                if ( rax > unpack->img_base + unpack->img_size )
+                {
+                    rip += instr.length;
+                    uc_reg_write( uc, UC_X86_REG_RIP, &rip );
+                }
+            }
         }
 
         return true;
     }
 
-    bool unpack_t::unpack_section_callback( uc_engine *uc, uint64_t address, uint32_t size, unpack_t *unpack )
+    bool unpack_t::unpack_section_callback( uc_engine *uc, uc_mem_type type, uint64_t address, int size, int64_t value,
+                                            unpack_t *unpack )
     {
-        std::printf( "> might be dump time...\n" );
-        std::getchar();
+        if ( address == unpack->pack_section_offset + unpack->img_base )
+        {
+            std::printf( "> dumping...\n" );
+            uc_emu_stop( uc );
+            return false;
+        }
         return true;
     }
 
@@ -285,8 +408,10 @@ namespace engine
                          value );
             break;
         case UC_MEM_FETCH_UNMAPPED:
+        {
             std::printf( ">>> fetching invalid instructions at address = 0x%p\n", address );
             break;
+        }
         default:
             break;
         }

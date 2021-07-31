@@ -144,7 +144,8 @@ int __cdecl main( int argc, const char *argv[] )
             return -1;
         }
 
-        std::ofstream output( parser.get< std::string >( "output" ), std::ios::binary );
+        std::printf( "> writing result to = %s\n", parser.get< std::string >( "out" ).c_str() );
+        std::ofstream output( parser.get< std::string >( "out" ), std::ios::binary );
         output.write( reinterpret_cast< char * >( unpacked_bin.data() ), unpacked_bin.size() );
         output.close();
     }
