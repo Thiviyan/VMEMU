@@ -1,4 +1,5 @@
 #pragma once
+#include <unicorn/unicorn.h>
 #include <vmprofiler.hpp>
 
 namespace vm
@@ -11,5 +12,8 @@ namespace vm
 
         bool init();
         bool get_trace( std::vector< vm::instrs::code_block_t > &code_blocks );
+
+      private:
+        uc_engine *uc_ctx;
     };
 } // namespace vm
