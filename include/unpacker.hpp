@@ -2,6 +2,7 @@
 #include <functional>
 #include <unicorn/unicorn.h>
 
+#include <xtils.hpp>
 #include <Zydis/Zydis.h>
 #include <atomic>
 #include <fstream>
@@ -21,6 +22,12 @@
 #define LOCAL_ALLOC_VECTOR 2
 #define LOCAL_FREE_VECTOR 3
 #define LOAD_LIBRARY_VECTOR 4
+#define NT_QUERY_SYSTEM_INFO_VECTOR 5
+
+#define MOV_RAX_0_SIG "\x48\xB8\x00\x00\x00\x00\x00\x00\x00\x00"
+#define MOV_RAX_0_MASK "xxxxxxxxxx"
+
+static_assert( sizeof MOV_RAX_0_SIG == sizeof MOV_RAX_0_MASK, "signature and mask sizes are wrong..." );
 
 namespace engine
 {
@@ -48,6 +55,7 @@ namespace engine
         static void local_alloc_hook( uc_engine *, unpack_t * );
         static void local_free_hook( uc_engine *, unpack_t * );
         static void load_library_hook( uc_engine *, unpack_t * );
+        static void query_system_info_hook( uc_engine *, unpack_t * );
         static void uc_strcpy( uc_engine *, char *buff, std::uintptr_t addr );
 
         static bool iat_dispatcher( uc_engine *uc, uint64_t address, uint32_t size, unpack_t *unpack );
@@ -64,6 +72,7 @@ namespace engine
             { "ExFreePool", { EX_FREE_POOL_VECTOR, &free_pool_hook } },
             { "LocalAlloc", { LOCAL_ALLOC_VECTOR, &local_alloc_hook } },
             { "LocalFree", { LOCAL_FREE_VECTOR, &local_free_hook } },
-            { "LoadLibraryA", { LOAD_LIBRARY_VECTOR, &load_library_hook } } };
+            { "LoadLibraryA", { LOAD_LIBRARY_VECTOR, &load_library_hook } },
+            { "NtQuerySystemInformation", { NT_QUERY_SYSTEM_INFO_VECTOR, &query_system_info_hook } } };
     };
 } // namespace engine

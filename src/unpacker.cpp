@@ -109,7 +109,11 @@ namespace engine
                       reinterpret_cast< win::image_thunk_data_t<> * >( import_dir->rva_first_thunk + map_bin.data() );
                   iat_thunk->address; ++iat_thunk )
             {
+                if ( iat_thunk->is_ordinal )
+                    continue;
+
                 auto iat_name = reinterpret_cast< win::image_named_import_t * >( iat_thunk->address + map_bin.data() );
+
                 if ( iat_hooks.find( iat_name->name ) != iat_hooks.end() )
                     iat_thunk->function = iat_hooks[ iat_name->name ].first + IAT_VECTOR_TABLE;
             }
@@ -159,7 +163,6 @@ namespace engine
                 }
 
                 pack_section_offset = header.virtual_address + header.virtual_size;
-                std::printf( "> adding unpack watch on section = %s\n", header.name.to_string().data() );
             }
             else if ( header.characteristics.mem_execute )
             {
@@ -171,8 +174,6 @@ namespace engine
                     std::printf( "> failed to add hook... reason = %d\n", err );
                     return false;
                 }
-
-                std::printf( "> added execution callback on section = %s\n", header.name.to_string().data() );
             }
         } );
 
@@ -217,6 +218,38 @@ namespace engine
         auto section_cnt = img->get_file_header()->num_sections;
 
         std::for_each( sections, sections + section_cnt, [ & ]( win::section_header_t &header ) {
+            if ( header.characteristics.mem_execute && !header.ptr_raw_data && !header.size_raw_data )
+            {
+                auto result = output.data() + header.virtual_address;
+                std::vector< std::uintptr_t > reloc_rvas;
+
+                do
+                {
+                    result = reinterpret_cast< std::uint8_t * >( xtils::um_t::get_instance()->sigscan(
+                        result, header.virtual_size, MOV_RAX_0_SIG, MOV_RAX_0_MASK ) );
+
+                    // offset from section begin...
+                    auto reloc_offset = ( reinterpret_cast< std::uintptr_t >( result ) + 2 ) -
+                                        reinterpret_cast< std::uintptr_t >( output.data() + header.virtual_address );
+
+                    reloc_rvas.push_back( reloc_offset );
+                } while ( result );
+
+                auto basereloc_dir = img->get_directory( win::directory_id::directory_entry_basereloc );
+                auto reloc_dir = reinterpret_cast< win::reloc_directory_t * >( basereloc_dir->rva + output.data() );
+                win::reloc_block_t *reloc_block = &reloc_dir->first_block;
+
+                //
+                // assuming that the .reloc section is the last section in the entire module...
+                //
+
+                while ( reloc_block->base_rva && reloc_block->size_block )
+                    reloc_block = reloc_block->next();
+
+                reloc_block->base_rva = header.virtual_address;
+                reloc_block->size_block = reloc_rvas.size() * sizeof win::reloc_entry_t;
+            }
+
             header.ptr_raw_data = header.virtual_address;
             header.size_raw_data = header.virtual_size;
         } );
@@ -225,7 +258,30 @@ namespace engine
 
     void unpack_t::alloc_pool_hook( uc_engine *uc_ctx, unpack_t *obj )
     {
-        // TODO
+        uc_err err;
+        std::uintptr_t rax, rdx;
+
+        if ( ( err = uc_reg_read( uc_ctx, UC_X86_REG_RDX, &rdx ) ) )
+        {
+            std::printf( "> failed to read RDX... reason = %d\n", rdx );
+            return;
+        }
+
+        auto size = ( ( rdx + PAGE_4KB ) & ~0xFFFull );
+        if ( ( err = uc_mem_map( uc_ctx, HEAP_BASE + obj->heap_offset, size, UC_PROT_ALL ) ) )
+        {
+            std::printf( "> failed to allocate memory... reason = %d\n", err );
+            return;
+        }
+
+        rax = HEAP_BASE + obj->heap_offset;
+        obj->heap_offset += size;
+
+        if ( ( err = uc_reg_write( uc_ctx, UC_X86_REG_RAX, &rax ) ) )
+        {
+            std::printf( "> failed to write rax... reason = %d\n", err );
+            return;
+        }
     }
 
     void unpack_t::free_pool_hook( uc_engine *uc_ctx, unpack_t *obj )
@@ -263,7 +319,14 @@ namespace engine
 
     void unpack_t::local_free_hook( uc_engine *uc_ctx, unpack_t *obj )
     {
-        // TODO
+        uc_err err;
+        std::uintptr_t rax = 0ull;
+
+        if ( ( err = uc_reg_write( uc_ctx, UC_X86_REG_RAX, &rax ) ) )
+        {
+            std::printf( "> failed to write rax... reason = %d\n", err );
+            return;
+        }
     }
 
     void unpack_t::load_library_hook( uc_engine *uc_ctx, unpack_t *obj )
@@ -317,6 +380,37 @@ namespace engine
 
             obj->loaded_modules.push_back( module_base );
         }
+    }
+
+    void unpack_t::query_system_info_hook( uc_engine *uc_ctx, unpack_t *obj )
+    {
+        uc_err err;
+        std::uintptr_t rcx, rdx, r8, r9;
+        if ( ( err = uc_reg_read( uc_ctx, UC_X86_REG_RCX, &rcx ) ) )
+        {
+            std::printf( "> failed to read reg... reason = %d\n", err );
+            return;
+        }
+
+        if ( ( err = uc_reg_read( uc_ctx, UC_X86_REG_RDX, &rdx ) ) )
+        {
+            std::printf( "> failed to read reg... reason = %d\n", err );
+            return;
+        }
+
+        if ( ( err = uc_reg_read( uc_ctx, UC_X86_REG_R8, &r8 ) ) )
+        {
+            std::printf( "> failed to read reg... reason = %d\n", err );
+            return;
+        }
+
+        if ( ( err = uc_reg_read( uc_ctx, UC_X86_REG_R9, &r9 ) ) )
+        {
+            std::printf( "> failed to read reg... reason = %d\n", err );
+            return;
+        }
+
+        std::printf( "> rcx = 0x%p, rdx = 0x%p, r8 = 0x%p, r9 = 0x%p\n", rcx, rdx, r8, r9 );
     }
 
     void unpack_t::uc_strcpy( uc_engine *uc_ctx, char *buff, std::uintptr_t addr )
