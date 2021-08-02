@@ -15,5 +15,6 @@ namespace vm
 
       private:
         uc_engine *uc_ctx;
+        vm::ctx_t *vm_ctx;
     };
 } // namespace vm

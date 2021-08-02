@@ -31,13 +31,13 @@ int __cdecl main( int argc, const char *argv[] )
 
     auto umtils = xtils::um_t::get_instance();
 
-    if ( !parser.exists( "unpack" ) )
+    if ( !parser.exists( "unpack" ) && parser.exists( "vmentry" ) && parser.exists( "bin" ) )
     {
         const auto module_base = reinterpret_cast< std::uintptr_t >(
             LoadLibraryExA( parser.get< std::string >( "bin" ).c_str(), NULL, DONT_RESOLVE_DLL_REFERENCES ) );
 
         const auto vm_entry_rva = std::strtoull( parser.get< std::string >( "vmentry" ).c_str(), nullptr, 16 );
-        const auto image_base = umtils->image_base( parser.get< std::string >( "vmpbin" ).c_str() );
+        const auto image_base = umtils->image_base( parser.get< std::string >( "bin" ).c_str() );
         const auto image_size = NT_HEADER( module_base )->OptionalHeader.SizeOfImage;
 
         std::printf( "> image base = %p, image size = %p, module base = %p\n", image_base, image_size, module_base );

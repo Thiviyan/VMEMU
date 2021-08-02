@@ -2,12 +2,14 @@
 
 namespace vm
 {
-    emu_t::emu_t( vm::ctx_t *vmctx )
+    emu_t::emu_t( vm::ctx_t *vm_ctx ) : vm_ctx( vm_ctx ), uc_ctx( nullptr )
     {
     }
 
     emu_t::~emu_t()
     {
+        if ( uc_ctx )
+            uc_close( uc_ctx );
     }
 
     bool emu_t::init()
