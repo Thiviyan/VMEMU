@@ -10,20 +10,6 @@
 #include <vector>
 #include <xtils.hpp>
 
-struct process_module_info_t
-{
-    std::uintptr_t section, mapped_base, img_base;
-    std::uint32_t image_size, flags;
-    std::uint16_t loaded_order_index, init_order_index, load_count, file_name_offset;
-    char file_path[ 0x100 ];
-};
-
-struct process_modules_t
-{
-    std::uint32_t cnt;
-    process_module_info_t modules[ VAR_LEN ];
-};
-
 #define PAGE_4KB 0x1000
 #define STACK_SIZE PAGE_4KB * 512
 
