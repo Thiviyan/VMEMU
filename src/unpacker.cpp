@@ -213,80 +213,107 @@ namespace engine
             return false;
         }
 
-        auto img = reinterpret_cast< win::image_t<> * >( output.data() );
-        auto sections = img->get_nt_headers()->get_sections();
-        auto section_cnt = img->get_file_header()->num_sections;
+        auto output_img = reinterpret_cast< win::image_t<> * >( output.data() );
+        auto sections = output_img->get_nt_headers()->get_sections();
+        auto section_cnt = output_img->get_file_header()->num_sections;
 
+        // { section virtual address -> vector of section offset to reloc }
+        std::map< std::uint32_t, std::vector< std::uint16_t > > new_relocs;
+
+        // search executable sections for MOV RAX, 00 00 00 00 00 00 00 00...
         std::for_each( sections, sections + section_cnt, [ & ]( win::section_header_t &header ) {
-            if ( header.characteristics.mem_execute && !header.ptr_raw_data && !header.size_raw_data )
+            if ( header.characteristics.mem_execute )
             {
                 auto result = output.data() + header.virtual_address;
-                std::vector< std::uintptr_t > reloc_rvas;
 
                 do
                 {
                     result = reinterpret_cast< std::uint8_t * >( xtils::um_t::get_instance()->sigscan(
-                        result, header.virtual_size, MOV_RAX_0_SIG, MOV_RAX_0_MASK ) );
+                        result,
+                        header.virtual_size -
+                            ( reinterpret_cast< std::uintptr_t >( result ) -
+                              ( header.virtual_address + reinterpret_cast< std::uintptr_t >( output.data() ) ) ),
+                        MOV_RAX_0_SIG, MOV_RAX_0_MASK ) );
 
-                    // offset from section begin...
-                    auto reloc_offset = ( reinterpret_cast< std::uintptr_t >( result ) + 2 ) -
-                                        reinterpret_cast< std::uintptr_t >( output.data() + header.virtual_address );
+                    if ( result )
+                    {
+                        result += 2; // advance ahead of the 0x48 0xB8...
 
-                    reloc_rvas.push_back( reloc_offset );
+                        // offset from section begin...
+                        auto reloc_offset =
+                            ( reinterpret_cast< std::uintptr_t >( result ) ) -
+                            reinterpret_cast< std::uintptr_t >( output.data() + header.virtual_address );
+
+                        new_relocs[ ( header.virtual_address + reloc_offset ) & ~0xFFFull ].push_back( reloc_offset );
+                    }
+
                 } while ( result );
-
-                auto basereloc_dir = img->get_directory( win::directory_id::directory_entry_basereloc );
-                auto reloc_dir = reinterpret_cast< win::reloc_directory_t * >( basereloc_dir->rva + output.data() );
-                win::reloc_block_t *reloc_block = &reloc_dir->first_block;
-
-                //
-                // assuming that the .reloc section is the last section in the entire module...
-                //
-
-                while ( reloc_block->base_rva && reloc_block->size_block )
-                    reloc_block = reloc_block->next();
-
-                reloc_block->base_rva = header.virtual_address;
-                reloc_block->size_block = reloc_rvas.size() * sizeof win::reloc_entry_t;
             }
 
             header.ptr_raw_data = header.virtual_address;
             header.size_raw_data = header.virtual_size;
         } );
+
+        // determines if a relocation block exists for a given page...
+        static const auto has_reloc_page = [ & ]( std::uint32_t page ) -> bool {
+            auto img = reinterpret_cast< win::image_t<> * >( output.data() );
+            auto sections = img->get_nt_headers()->get_sections();
+            auto section_cnt = img->get_file_header()->num_sections;
+
+            auto basereloc_dir = img->get_directory( win::directory_id::directory_entry_basereloc );
+            auto reloc_dir = reinterpret_cast< win::reloc_directory_t * >( basereloc_dir->rva + output.data() );
+            win::reloc_block_t *reloc_block = &reloc_dir->first_block;
+
+            while ( reloc_block->base_rva && reloc_block->size_block )
+            {
+                if ( reloc_block->base_rva == page )
+                    return true;
+
+                reloc_block = reloc_block->next();
+            }
+
+            return false;
+        };
+
+        // calc size to add new reloc info...
+        std::size_t resize_cnt = 0ull;
+        for ( const auto &[ reloc_rva, relocs ] : new_relocs )
+            if ( !has_reloc_page( reloc_rva ) )
+                resize_cnt += sizeof( win::reloc_block_t ) + ( relocs.size() * sizeof( win::reloc_entry_t ) );
+
+        // last block needs to contain 0 for block_rva and size_block...
+        if ( resize_cnt )
+            resize_cnt += sizeof win::reloc_block_t;
+
+        output.resize( output.size() + resize_cnt );
+        output_img = reinterpret_cast< win::image_t<> * >( output.data() );
+
+        auto basereloc_dir = output_img->get_directory( win::directory_id::directory_entry_basereloc );
+        auto reloc_dir = reinterpret_cast< win::reloc_directory_t * >( basereloc_dir->rva + output.data() );
+
+        basereloc_dir->size += resize_cnt;
+        for ( const auto &[ reloc_rva, relocs ] : new_relocs )
+        {
+            if ( has_reloc_page( reloc_rva ) )
+                continue;
+
+            win::reloc_block_t *reloc_block = &reloc_dir->first_block;
+            while ( reloc_block->base_rva && reloc_block->size_block )
+                reloc_block = reloc_block->next();
+
+            reloc_block->base_rva = reloc_rva;
+            reloc_block->size_block = relocs.size() * sizeof( win::reloc_entry_t ) + sizeof uint64_t;
+
+            reloc_block->next()->base_rva = 0ull;
+            reloc_block->next()->size_block = 0ull;
+
+            for ( auto idx = 0u; idx < relocs.size(); ++idx )
+            {
+                reloc_block->entries[ idx ].type = win::reloc_type_id::rel_based_dir64;
+                reloc_block->entries[ idx ].offset = relocs[ idx ];
+            }
+        }
         return true;
-    }
-
-    void unpack_t::alloc_pool_hook( uc_engine *uc_ctx, unpack_t *obj )
-    {
-        uc_err err;
-        std::uintptr_t rax, rdx;
-
-        if ( ( err = uc_reg_read( uc_ctx, UC_X86_REG_RDX, &rdx ) ) )
-        {
-            std::printf( "> failed to read RDX... reason = %d\n", rdx );
-            return;
-        }
-
-        auto size = ( ( rdx + PAGE_4KB ) & ~0xFFFull );
-        if ( ( err = uc_mem_map( uc_ctx, HEAP_BASE + obj->heap_offset, size, UC_PROT_ALL ) ) )
-        {
-            std::printf( "> failed to allocate memory... reason = %d\n", err );
-            return;
-        }
-
-        rax = HEAP_BASE + obj->heap_offset;
-        obj->heap_offset += size;
-
-        if ( ( err = uc_reg_write( uc_ctx, UC_X86_REG_RAX, &rax ) ) )
-        {
-            std::printf( "> failed to write rax... reason = %d\n", err );
-            return;
-        }
-    }
-
-    void unpack_t::free_pool_hook( uc_engine *uc_ctx, unpack_t *obj )
-    {
-        // TODO
     }
 
     void unpack_t::local_alloc_hook( uc_engine *uc_ctx, unpack_t *obj )
@@ -380,37 +407,6 @@ namespace engine
 
             obj->loaded_modules.push_back( module_base );
         }
-    }
-
-    void unpack_t::query_system_info_hook( uc_engine *uc_ctx, unpack_t *obj )
-    {
-        uc_err err;
-        std::uintptr_t rcx, rdx, r8, r9;
-        if ( ( err = uc_reg_read( uc_ctx, UC_X86_REG_RCX, &rcx ) ) )
-        {
-            std::printf( "> failed to read reg... reason = %d\n", err );
-            return;
-        }
-
-        if ( ( err = uc_reg_read( uc_ctx, UC_X86_REG_RDX, &rdx ) ) )
-        {
-            std::printf( "> failed to read reg... reason = %d\n", err );
-            return;
-        }
-
-        if ( ( err = uc_reg_read( uc_ctx, UC_X86_REG_R8, &r8 ) ) )
-        {
-            std::printf( "> failed to read reg... reason = %d\n", err );
-            return;
-        }
-
-        if ( ( err = uc_reg_read( uc_ctx, UC_X86_REG_R9, &r9 ) ) )
-        {
-            std::printf( "> failed to read reg... reason = %d\n", err );
-            return;
-        }
-
-        std::printf( "> rcx = 0x%p, rdx = 0x%p, r8 = 0x%p, r9 = 0x%p\n", rcx, rdx, r8, r9 );
     }
 
     void unpack_t::uc_strcpy( uc_engine *uc_ctx, char *buff, std::uintptr_t addr )

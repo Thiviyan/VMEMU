@@ -2,13 +2,27 @@
 #include <functional>
 #include <unicorn/unicorn.h>
 
-#include <xtils.hpp>
 #include <Zydis/Zydis.h>
 #include <atomic>
 #include <fstream>
 #include <map>
 #include <nt/image.hpp>
 #include <vector>
+#include <xtils.hpp>
+
+struct process_module_info_t
+{
+    std::uintptr_t section, mapped_base, img_base;
+    std::uint32_t image_size, flags;
+    std::uint16_t loaded_order_index, init_order_index, load_count, file_name_offset;
+    char file_path[ 0x100 ];
+};
+
+struct process_modules_t
+{
+    std::uint32_t cnt;
+    process_module_info_t modules[ VAR_LEN ];
+};
 
 #define PAGE_4KB 0x1000
 #define STACK_SIZE PAGE_4KB * 512
@@ -50,12 +64,9 @@ namespace engine
         std::uintptr_t img_base, img_size, heap_offset, pack_section_offset;
         win::image_t<> *win_img;
 
-        static void alloc_pool_hook( uc_engine *, unpack_t * );
-        static void free_pool_hook( uc_engine *, unpack_t * );
         static void local_alloc_hook( uc_engine *, unpack_t * );
         static void local_free_hook( uc_engine *, unpack_t * );
         static void load_library_hook( uc_engine *, unpack_t * );
-        static void query_system_info_hook( uc_engine *, unpack_t * );
         static void uc_strcpy( uc_engine *, char *buff, std::uintptr_t addr );
 
         static bool iat_dispatcher( uc_engine *uc, uint64_t address, uint32_t size, unpack_t *unpack );
@@ -68,11 +79,8 @@ namespace engine
 
         std::vector< std::uintptr_t > loaded_modules;
         std::map< std::string, std::pair< std::uint32_t, iat_hook_t > > iat_hooks = {
-            { "ExAllocatePool", { EX_ALLOCATE_POOL_VECTOR, &alloc_pool_hook } },
-            { "ExFreePool", { EX_FREE_POOL_VECTOR, &free_pool_hook } },
             { "LocalAlloc", { LOCAL_ALLOC_VECTOR, &local_alloc_hook } },
             { "LocalFree", { LOCAL_FREE_VECTOR, &local_free_hook } },
-            { "LoadLibraryA", { LOAD_LIBRARY_VECTOR, &load_library_hook } },
-            { "NtQuerySystemInformation", { NT_QUERY_SYSTEM_INFO_VECTOR, &query_system_info_hook } } };
+            { "LoadLibraryA", { LOAD_LIBRARY_VECTOR, &load_library_hook } } };
     };
 } // namespace engine
