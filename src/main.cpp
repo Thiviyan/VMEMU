@@ -36,6 +36,12 @@ int __cdecl main( int argc, const char *argv[] )
         const auto module_base = reinterpret_cast< std::uintptr_t >(
             LoadLibraryExA( parser.get< std::string >( "bin" ).c_str(), NULL, DONT_RESOLVE_DLL_REFERENCES ) );
 
+        if ( !module_base )
+        {
+            std::printf( "[!] failed to open binary file...\n" );
+            return -1;
+        }
+
         const auto vm_entry_rva = std::strtoull( parser.get< std::string >( "vmentry" ).c_str(), nullptr, 16 );
         const auto image_base = umtils->image_base( parser.get< std::string >( "bin" ).c_str() );
         const auto image_size = NT_HEADER( module_base )->OptionalHeader.SizeOfImage;
