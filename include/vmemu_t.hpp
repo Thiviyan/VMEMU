@@ -1,11 +1,14 @@
 #pragma once
-#include <nt/image.hpp>
 #include <unicorn/unicorn.h>
+
+#include <nt/image.hpp>
 #include <vmprofiler.hpp>
 
 #define PAGE_4KB 0x1000
 #define STACK_SIZE PAGE_4KB * 512
+
 #define STACK_BASE 0xFFFF000000000000
+#define IAT_VECTOR_TABLE 0xFFFFF00000000000
 
 namespace vm
 {
@@ -26,7 +29,7 @@ namespace vm
         };
 
       public:
-        explicit emu_t( vm::ctx_t *g_vm_ctx );
+        explicit emu_t( vm::ctx_t *vm_ctx );
         ~emu_t();
 
         bool init();

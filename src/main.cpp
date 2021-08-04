@@ -77,7 +77,10 @@ int __cdecl main( int argc, const char *argv[] )
         }
 
         if ( !emu.get_trace( code_blocks ) )
+        {
             std::printf( "[!] something failed during tracing, review the console for more information...\n" );
+            return -1;
+        }
 
         std::printf( "> number of blocks = %d\n", code_blocks.size() );
 
@@ -207,7 +210,7 @@ int __cdecl main( int argc, const char *argv[] )
             if ( !emu.get_trace( new_code_blocks ) )
             {
                 std::printf( "[!] something failed during tracing, review the console for more information...\n" );
-                return -1;
+                continue;
             }
 
             std::printf( "> number of blocks = %d\n", new_code_blocks.size() );

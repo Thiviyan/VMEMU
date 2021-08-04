@@ -2,8 +2,8 @@
 
 namespace vm
 {
-    emu_t::emu_t( vm::ctx_t *g_vm_ctx )
-        : g_vm_ctx( g_vm_ctx ), uc_ctx( nullptr ), img_base( g_vm_ctx->image_base ), img_size( g_vm_ctx->image_size )
+    emu_t::emu_t( vm::ctx_t *vm_ctx )
+        : g_vm_ctx( vm_ctx ), uc_ctx( nullptr ), img_base( vm_ctx->image_base ), img_size( vm_ctx->image_size )
     {
     }
 
@@ -28,20 +28,21 @@ namespace vm
             return false;
         }
 
-        if ( ( err = uc_mem_map( uc_ctx, img_base, img_size, UC_PROT_ALL ) ) )
+        if ( ( err = uc_mem_map( uc_ctx, g_vm_ctx->module_base, img_size, UC_PROT_ALL ) ) )
         {
             std::printf( "> map memory failed, reason = %d\n", err );
             return false;
         }
 
-        if ( ( err = uc_mem_write( uc_ctx, img_base, reinterpret_cast< void * >( g_vm_ctx->module_base ), img_size ) ) )
+        if ( ( err = uc_mem_write( uc_ctx, g_vm_ctx->module_base, reinterpret_cast< void * >( g_vm_ctx->module_base ),
+                                   img_size ) ) )
         {
             std::printf( "> failed to write memory... reason = %d\n", err );
             return false;
         }
 
-        if ( ( err = uc_hook_add( uc_ctx, &code_exec_hook, UC_HOOK_CODE, &vm::emu_t::code_exec_callback, this, img_base,
-                                  img_base + img_size ) ) )
+        if ( ( err = uc_hook_add( uc_ctx, &code_exec_hook, UC_HOOK_CODE, &vm::emu_t::code_exec_callback, this,
+                                  g_vm_ctx->module_base, g_vm_ctx->module_base + img_size ) ) )
         {
             std::printf( "> uc_hook_add error, reason = %d\n", err );
             return false;
@@ -61,7 +62,7 @@ namespace vm
     bool emu_t::get_trace( std::vector< vm::instrs::code_block_t > &entries )
     {
         uc_err err;
-        std::uintptr_t rip = g_vm_ctx->vm_entry_rva + img_base, rsp = STACK_BASE + STACK_SIZE - PAGE_4KB;
+        std::uintptr_t rip = g_vm_ctx->vm_entry_rva + g_vm_ctx->module_base, rsp = STACK_BASE + STACK_SIZE - PAGE_4KB;
 
         if ( ( err = uc_reg_write( uc_ctx, UC_X86_REG_RSP, &rsp ) ) )
         {
@@ -105,7 +106,8 @@ namespace vm
                     continue;
 
                 std::uintptr_t rbp = 0ull;
-                std::uint32_t branch_rva = _code_block.code_block.jcc.block_addr[ 1 ];
+                std::uint32_t branch_rva =
+                    ( _code_block.code_block.jcc.block_addr[ 1 ] - g_vm_ctx->module_base ) + g_vm_ctx->image_base;
 
                 // setup object globals so that the tracing will work...
                 code_block_data_t branch_block{ { _code_block.cpu_ctx->rip }, nullptr, nullptr };
@@ -160,7 +162,8 @@ namespace vm
                     continue;
 
                 std::uintptr_t rbp = 0ull;
-                std::uint32_t branch_rva = _code_block.code_block.jcc.block_addr[ 0 ];
+                std::uint32_t branch_rva =
+                    ( _code_block.code_block.jcc.block_addr[ 1 ] - g_vm_ctx->module_base ) + g_vm_ctx->image_base;
 
                 // setup object globals so that the tracing will work...
                 code_block_data_t branch_block{ { _code_block.cpu_ctx->rip }, nullptr, nullptr };
@@ -271,8 +274,8 @@ namespace vm
             ZydisFormatterInit( &formatter, ZYDIS_FORMATTER_STYLE_INTEL );
         }
 
-        auto instr_ptr = reinterpret_cast< void * >( obj->g_vm_ctx->module_base + ( address - obj->img_base ) );
-        if ( !ZYAN_SUCCESS( ZydisDecoderDecodeBuffer( &decoder, instr_ptr, PAGE_4KB, &instr ) ) )
+        if ( !ZYAN_SUCCESS(
+                 ZydisDecoderDecodeBuffer( &decoder, reinterpret_cast< void * >( address ), PAGE_4KB, &instr ) ) )
         {
             std::printf( "> failed to decode instruction at = 0x%p\n", address );
             if ( ( err = uc_emu_stop( uc ) ) )
@@ -332,19 +335,6 @@ namespace vm
 
         const auto &vm_handler = obj->g_vm_ctx->vm_handlers[ vm_handler_table_idx ];
 
-        // quick check to ensure sanity... things can get crazy so this is good to check...
-        if ( vm_handler.address != vm_handler_addr )
-        {
-            std::printf( "> vm handler index (%d) does not match vm handler address (%p)...\n", vm_handler_table_idx,
-                         vm_handler_addr );
-            if ( ( err = uc_emu_stop( uc ) ) )
-            {
-                std::printf( "> failed to stop emulation, exiting... reason = %d\n", err );
-                exit( 0 );
-            }
-            return false;
-        }
-
         if ( ( err = obj->create_entry( &vinstr_entry ) ) )
         {
             std::printf( "> failed to create vinstr entry... reason = %d\n", err );
@@ -353,6 +343,23 @@ namespace vm
                 std::printf( "> failed to stop emulation, exiting... reason = %d\n", err );
                 exit( 0 );
             }
+            return false;
+        }
+
+        // quick check to ensure sanity... things can get crazy so this is good to check...
+        if ( vm_handler.address != vm_handler_addr ||
+             vinstr_entry.vip >= obj->g_vm_ctx->module_base + obj->g_vm_ctx->image_size ||
+             vinstr_entry.vip < obj->g_vm_ctx->module_base )
+        {
+            std::printf( "> vm handler index (%d) does not match vm handler address (%p)...\n", vm_handler_table_idx,
+                         vm_handler_addr );
+
+            if ( ( err = uc_emu_stop( uc ) ) )
+            {
+                std::printf( "> failed to stop emulation, exiting... reason = %d\n", err );
+                exit( 0 );
+            }
+
             return false;
         }
 
@@ -409,8 +416,9 @@ namespace vm
                 // optimize so that we dont need to create a new vm::ctx_t every single virtual JMP...
                 if ( obj->vm_ctxs.find( vm_handler_addr ) == obj->vm_ctxs.end() )
                 {
-                    obj->vm_ctxs[ vm_handler_addr ] = std::make_shared< vm::ctx_t >(
-                        obj->g_vm_ctx->module_base, obj->img_base, obj->img_size, vm_handler_addr - obj->img_base );
+                    obj->vm_ctxs[ vm_handler_addr ] =
+                        std::make_shared< vm::ctx_t >( obj->g_vm_ctx->module_base, obj->img_base, obj->img_size,
+                                                       vm_handler_addr - obj->g_vm_ctx->module_base );
 
                     if ( !obj->vm_ctxs[ vm_handler_addr ]->init() )
                     {
