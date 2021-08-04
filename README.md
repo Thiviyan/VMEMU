@@ -8,33 +8,28 @@
 
 VMEmu uses unicorn to emulate x86_64 instructions which make up the virtual machine handlers. This project is extremely simple in that it will check every executed instruction in order to find any `JMP` instruction which uses a register and jumps to a vm handler. When this JMP is executed all native registers, virtual scratch registers, and the virtual stack are saved into a trace entry. Emulation ends when a VMEXIT instruction is found. This project supports multi-code path virtual instruction code and will discover all code paths. You can continue the analysis using IDA outside of the virtual machine and then use VMEmu again once execution enters back into the virtual machine. 
 
-# Restrictions 
-
-* dumped modules are not supported at the moment as a "dump" can mean many things
-    * I.E: does the dump have a pe header? are the sections of the dump mapped back to file offset manner?
-    * does the dump file have relocations fixed?
-* Only x86_64 PE files are supported, support for ELF can be added later, no support for x86 will be added.
-
-# Usage - Creating A Trace
-
-In order to use VMEmu you must have an unpacked VMProtect 2 binary which you know some basic information about. 
-
 ```
-Usage: vmemu [options...]
+Usage: VMEmu [options...]
 Options:
-    --vmentry              relative virtual address to a vm entry... (Required)
-    --vmpbin               path to unpacked virtualized binary... (Required)
-    --out                  output file name for trace file... (Required)
+    --vmentry              relative virtual address to a vm entry...
+    --bin                  path to unpacked virtualized binary...
+    --out                  output file name...
+    --unpack               unpack a vmp2, usermode, binary...
+    --locateconst          scan all vm enters for a specific constant value...
     -h, --help             Shows this page
 ```
 
 # Building Instructions
 
-First download the repo using `git clone --recursive https://githacks.org/vmp2/vmemu.git`. Then navigate to ***dependencies*** --> ***unicorn*** --> ***msvc***. Open ***unicorn.sln***, select ***Release*** and ***x64*** on the top of Visual Studios, then click ***Build*** --> ***Build Solution***.
+Download and generate visual studios project. Ensure you have Visual Studios 2019 installed!
 
-Now that unicorn has been built, you can open ***vmemu.sln**. Select ***Release MT*** and ***x64***, then click ***Build*** --> ***Build Solution***. Now copy ***unicorn.dll*** from ***dependencies/unicorn/msvc/x64/Release/unicorn.dll*** into ***x64/Release/***. You should now be able to open a command prompt inside of ***x64/Release/***, type `vmemu.exe -h`, if the help message is displayed then everything has worked.
+```
+git clone --recursive https://githacks.org/vmp2/vmemu.git
+cd vmemu
+cmake -B build
+```
 
-The reason for building unicorn outside of the vmemu solution is that unicorn has build scripts which create folders. These build scripts fail when they are in the wrong working directory. 
+Go into `build` and open `vmemu.sln`. Select "Release", and "x64", then build the project.
 
 # VMProtect 2 - Virtual Machine Architecture Overview
 
@@ -189,3 +184,8 @@ mov     rdx, [rbp+0]
 add     rbp, 8
 mov     [rax+rdi], rdx
 ```
+
+# Links
+
+https://back.engineering/17/05/2021/
+https://back.engineering/21/06/2021/
