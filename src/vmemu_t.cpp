@@ -92,35 +92,35 @@ namespace vm
         // when idx is > code_blocks.size() then we have traced all branches...
         for ( auto idx = 0u; idx < code_blocks.size(); ++idx )
         {
-            const auto &code_block = code_blocks[ idx ];
-            if ( !code_block.code_block.jcc.has_jcc )
+            const auto _code_block = code_blocks[ idx ];
+            if ( !_code_block.code_block.jcc.has_jcc )
                 continue;
 
-            switch ( code_block.code_block.jcc.type )
+            switch ( _code_block.code_block.jcc.type )
             {
             case vm::instrs::jcc_type::branching:
             {
-                if ( std::find( vip_begins.begin(), vip_begins.end(), code_block.code_block.jcc.block_addr[ 1 ] ) !=
+                if ( std::find( vip_begins.begin(), vip_begins.end(), _code_block.code_block.jcc.block_addr[ 1 ] ) !=
                      vip_begins.end() )
                     continue;
 
                 std::uintptr_t rbp = 0ull;
-                std::uint32_t branch_rva = code_block.code_block.jcc.block_addr[ 1 ];
+                std::uint32_t branch_rva = _code_block.code_block.jcc.block_addr[ 1 ];
 
                 // setup object globals so that the tracing will work...
-                code_block_data_t branch_block{ { code_block.cpu_ctx->rip }, nullptr, nullptr };
+                code_block_data_t branch_block{ { _code_block.cpu_ctx->rip }, nullptr, nullptr };
                 cc_block = &branch_block;
-                g_vm_ctx = code_block.g_vm_ctx.get();
+                g_vm_ctx = _code_block.g_vm_ctx.get();
 
                 // restore register values...
-                if ( ( err = uc_context_restore( uc_ctx, code_block.cpu_ctx->context ) ) )
+                if ( ( err = uc_context_restore( uc_ctx, _code_block.cpu_ctx->context ) ) )
                 {
                     std::printf( "> failed to restore emu context... reason = %d\n", err );
                     return false;
                 }
 
                 // restore stack values...
-                if ( ( err = uc_mem_write( uc_ctx, STACK_BASE, code_block.cpu_ctx->stack, STACK_SIZE ) ) )
+                if ( ( err = uc_mem_write( uc_ctx, STACK_BASE, _code_block.cpu_ctx->stack, STACK_SIZE ) ) )
                 {
                     std::printf( "> failed to restore stack... reason = %d\n", err );
                     return false;
@@ -140,8 +140,8 @@ namespace vm
                     return false;
                 }
 
-                std::printf( "> beginning execution at = 0x%p\n", code_block.cpu_ctx->rip );
-                if ( ( err = uc_emu_start( uc_ctx, code_block.cpu_ctx->rip, 0ull, 0ull, 0ull ) ) )
+                std::printf( "> beginning execution at = 0x%p\n", _code_block.cpu_ctx->rip );
+                if ( ( err = uc_emu_start( uc_ctx, _code_block.cpu_ctx->rip, 0ull, 0ull, 0ull ) ) )
                 {
                     std::printf( "> error starting emu... reason = %d\n", err );
                     return false;
@@ -155,27 +155,27 @@ namespace vm
             }
             case vm::instrs::jcc_type::absolute:
             {
-                if ( std::find( vip_begins.begin(), vip_begins.end(), code_block.code_block.jcc.block_addr[ 0 ] ) !=
+                if ( std::find( vip_begins.begin(), vip_begins.end(), _code_block.code_block.jcc.block_addr[ 0 ] ) !=
                      vip_begins.end() )
                     continue;
 
                 std::uintptr_t rbp = 0ull;
-                std::uint32_t branch_rva = code_block.code_block.jcc.block_addr[ 0 ];
+                std::uint32_t branch_rva = _code_block.code_block.jcc.block_addr[ 0 ];
 
                 // setup object globals so that the tracing will work...
-                code_block_data_t branch_block{ { code_block.cpu_ctx->rip }, nullptr, nullptr };
+                code_block_data_t branch_block{ { _code_block.cpu_ctx->rip }, nullptr, nullptr };
                 cc_block = &branch_block;
-                g_vm_ctx = code_block.g_vm_ctx.get();
+                g_vm_ctx = _code_block.g_vm_ctx.get();
 
                 // restore register values...
-                if ( ( err = uc_context_restore( uc_ctx, code_block.cpu_ctx->context ) ) )
+                if ( ( err = uc_context_restore( uc_ctx, _code_block.cpu_ctx->context ) ) )
                 {
                     std::printf( "> failed to restore emu context... reason = %d\n", err );
                     return false;
                 }
 
                 // restore stack values...
-                if ( ( err = uc_mem_write( uc_ctx, STACK_BASE, code_block.cpu_ctx->stack, STACK_SIZE ) ) )
+                if ( ( err = uc_mem_write( uc_ctx, STACK_BASE, _code_block.cpu_ctx->stack, STACK_SIZE ) ) )
                 {
                     std::printf( "> failed to restore stack... reason = %d\n", err );
                     return false;
@@ -195,8 +195,8 @@ namespace vm
                     return false;
                 }
 
-                std::printf( "> beginning execution at = 0x%p\n", code_block.cpu_ctx->rip );
-                if ( ( err = uc_emu_start( uc_ctx, code_block.cpu_ctx->rip, 0ull, 0ull, 0ull ) ) )
+                std::printf( "> beginning execution at = 0x%p\n", _code_block.cpu_ctx->rip );
+                if ( ( err = uc_emu_start( uc_ctx, _code_block.cpu_ctx->rip, 0ull, 0ull, 0ull ) ) )
                 {
                     std::printf( "> error starting emu... reason = %d\n", err );
                     return false;
@@ -257,6 +257,9 @@ namespace vm
         vmp2::v2::entry_t vinstr_entry;
         std::uint8_t vm_handler_table_idx = 0u;
         std::uintptr_t vm_handler_addr;
+
+        static std::shared_ptr< vm::ctx_t > _jmp_ctx;
+        static zydis_routine_t _jmp_stream;
 
         static ZydisDecoder decoder;
         static ZydisFormatter formatter;
@@ -402,21 +405,28 @@ namespace vm
 
                 // allocate space for the cpu context and stack...
                 auto new_cpu_ctx = std::make_shared< vm::emu_t::cpu_ctx_t >();
-                auto new_vm_ctx = std::make_shared< vm::ctx_t >( obj->g_vm_ctx->module_base, obj->img_base,
-                                                                 obj->img_size, vm_handler_addr - obj->img_base );
-                if ( !new_vm_ctx->init() )
-                {
-                    std::printf( "> failed to init vm::ctx_t for virtual jmp... vip = 0x%p, jmp handler = 0x%p\n",
-                                 vinstr_entry.vip, vm_handler_addr );
 
-                    if ( ( err = uc_emu_stop( uc ) ) )
+                // optimize so that we dont need to create a new vm::ctx_t every single virtual JMP...
+                if ( obj->vm_ctxs.find( vm_handler_addr ) == obj->vm_ctxs.end() )
+                {
+                    obj->vm_ctxs[ vm_handler_addr ] = std::make_shared< vm::ctx_t >(
+                        obj->g_vm_ctx->module_base, obj->img_base, obj->img_size, vm_handler_addr - obj->img_base );
+
+                    if ( !obj->vm_ctxs[ vm_handler_addr ]->init() )
                     {
-                        std::printf( "> failed to stop emulation, exiting... reason = %d\n", err );
-                        exit( 0 );
+                        std::printf( "> failed to init vm::ctx_t for virtual jmp... vip = 0x%p, jmp handler = 0x%p\n",
+                                     vinstr_entry.vip, vm_handler_addr );
+
+                        if ( ( err = uc_emu_stop( uc ) ) )
+                        {
+                            std::printf( "> failed to stop emulation, exiting... reason = %d\n", err );
+                            exit( 0 );
+                        }
+                        return false;
                     }
-                    return false;
                 }
 
+                _jmp_ctx = obj->vm_ctxs[ vm_handler_addr ];
                 if ( ( err = uc_context_alloc( uc, &new_cpu_ctx->context ) ) )
                 {
                     std::printf( "> failed to allocate a unicorn context... reason = %d\n", err );
@@ -460,7 +470,7 @@ namespace vm
                 }
 
                 obj->cc_block->cpu_ctx = new_cpu_ctx;
-                obj->cc_block->g_vm_ctx = new_vm_ctx;
+                obj->cc_block->g_vm_ctx = _jmp_ctx;
                 break;
             }
             default:

@@ -42,6 +42,8 @@ namespace vm
 
         std::vector< std::uintptr_t > vip_begins;
         std::vector< code_block_data_t > code_blocks;
+        std::map< std::uintptr_t, std::shared_ptr< vm::ctx_t > > vm_ctxs;
+
         uc_err create_entry( vmp2::v2::entry_t *entry );
         static bool code_exec_callback( uc_engine *uc, uint64_t address, uint32_t size, emu_t *obj );
         static void invalid_mem( uc_engine *uc, uc_mem_type type, uint64_t address, int size, int64_t value,

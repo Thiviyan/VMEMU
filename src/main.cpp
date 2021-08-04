@@ -11,8 +11,11 @@ int __cdecl main( int argc, const char *argv[] )
     argparse::argument_parser_t parser( "VMEmu", "VMProtect 2 VM Handler Emulator" );
     parser.add_argument().name( "--vmentry" ).description( "relative virtual address to a vm entry..." );
     parser.add_argument().name( "--bin" ).description( "path to unpacked virtualized binary..." );
-    parser.add_argument().required( true ).name( "--out" ).description( "output file name..." );
+    parser.add_argument().name( "--out" ).description( "output file name..." );
     parser.add_argument().name( "--unpack" ).description( "unpack a vmp2 binary..." );
+    parser.add_argument()
+        .name( "--locateconst" )
+        .description( "scan all vm enters for a specific constant value...\n" );
 
     parser.enable_help();
     auto result = parser.parse( argc, argv );
@@ -31,7 +34,7 @@ int __cdecl main( int argc, const char *argv[] )
 
     auto umtils = xtils::um_t::get_instance();
 
-    if ( !parser.exists( "unpack" ) && parser.exists( "vmentry" ) && parser.exists( "bin" ) )
+    if ( !parser.exists( "unpack" ) && parser.exists( "vmentry" ) && parser.exists( "bin" ) && parser.exists( "out" ) )
     {
         const auto module_base = reinterpret_cast< std::uintptr_t >(
             LoadLibraryExA( parser.get< std::string >( "bin" ).c_str(), NULL, DONT_RESOLVE_DLL_REFERENCES ) );
@@ -127,7 +130,7 @@ int __cdecl main( int argc, const char *argv[] )
 
         output.close();
     }
-    else
+    else if ( parser.exists( "unpack" ) && parser.exists( "bin" ) && parser.exists( "out" ) )
     {
         std::vector< std::uint8_t > packed_bin, unpacked_bin;
         if ( !umtils->open_binary_file( parser.get< std::string >( "unpack" ), packed_bin ) )
@@ -154,5 +157,74 @@ int __cdecl main( int argc, const char *argv[] )
         std::ofstream output( parser.get< std::string >( "out" ), std::ios::binary );
         output.write( reinterpret_cast< char * >( unpacked_bin.data() ), unpacked_bin.size() );
         output.close();
+    }
+    else if ( parser.exists( "bin" ) && parser.exists( "locateconst" ) )
+    {
+        std::vector< vm::instrs::code_block_t > code_blocks;
+        const auto module_base = reinterpret_cast< std::uintptr_t >(
+            LoadLibraryExA( parser.get< std::string >( "bin" ).c_str(), NULL, DONT_RESOLVE_DLL_REFERENCES ) );
+
+        const auto const_val = std::strtoull( parser.get< std::string >( "locateconst" ).c_str(), nullptr, 16 );
+        const auto image_base = umtils->image_base( parser.get< std::string >( "bin" ).c_str() );
+        const auto image_size = NT_HEADER( module_base )->OptionalHeader.SizeOfImage;
+
+        auto vm_handler_tables = vm::locate::all_handler_tables( module_base );
+        auto vm_enters = vm::locate::all_vm_enters( module_base, vm_handler_tables );
+
+        std::printf( "> number of vm enters = %d\n", vm_enters.size() );
+        if ( std::find_if( vm_enters.begin() + 1, vm_enters.end(),
+                           [ & ]( const std::pair< std::uint32_t, std::uint32_t > &vm_enter_data ) -> bool {
+                               return vm_enter_data.second == vm_enters[ 0 ].second;
+                           } ) != vm_enters.end() )
+        {
+            std::printf( "> optimizations can be done.\n" );
+            std::getchar();
+        }
+
+        for ( const auto &[ vm_enter_offset, encrypted_rva ] : vm_enters )
+        {
+            std::printf( "> emulating vm enter at rva = 0x%x\n", vm_enter_offset );
+            vm::ctx_t vm_ctx( module_base, image_base, image_size, vm_enter_offset );
+
+            if ( !vm_ctx.init() )
+            {
+                std::printf( "[!] failed to init vmctx... this can be for many reasons..."
+                             " try validating your vm entry rva... make sure the binary is unpacked and is"
+                             "protected with VMProtect 2...\n" );
+                return -1;
+            }
+
+            vm::emu_t emu( &vm_ctx );
+
+            if ( !emu.init() )
+            {
+                std::printf( "[!] failed to init emulator...\n" );
+                return -1;
+            }
+
+            std::vector< vm::instrs::code_block_t > new_code_blocks;
+
+            if ( !emu.get_trace( new_code_blocks ) )
+            {
+                std::printf( "[!] something failed during tracing, review the console for more information...\n" );
+                return -1;
+            }
+
+            std::printf( "> number of blocks = %d\n", new_code_blocks.size() );
+
+            for ( auto &code_block : new_code_blocks )
+            {
+                for ( const auto &vinstr : code_block.vinstrs )
+                {
+                    if ( vinstr.operand.has_imm && vinstr.operand.imm.u == const_val )
+                    {
+                        std::printf( "> found constant in vm enter at = 0x%x\n", vm_enter_offset );
+                        std::getchar();
+                    }
+                }
+            }
+
+            code_blocks.insert( code_blocks.end(), new_code_blocks.begin(), new_code_blocks.end() );
+        }
     }
 }
