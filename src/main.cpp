@@ -133,7 +133,7 @@ int __cdecl main( int argc, const char *argv[] )
 
         output.close();
     }
-    else if ( parser.exists( "unpack" ) && parser.exists( "bin" ) && parser.exists( "out" ) )
+    else if ( parser.exists( "unpack" ) && parser.exists( "out" ) )
     {
         std::vector< std::uint8_t > packed_bin, unpacked_bin;
         if ( !umtils->open_binary_file( parser.get< std::string >( "unpack" ), packed_bin ) )
@@ -163,7 +163,6 @@ int __cdecl main( int argc, const char *argv[] )
     }
     else if ( parser.exists( "bin" ) && parser.exists( "locateconst" ) )
     {
-        std::vector< vm::instrs::code_block_t > code_blocks;
         const auto module_base = reinterpret_cast< std::uintptr_t >(
             LoadLibraryExA( parser.get< std::string >( "bin" ).c_str(), NULL, DONT_RESOLVE_DLL_REFERENCES ) );
 
@@ -205,17 +204,17 @@ int __cdecl main( int argc, const char *argv[] )
                 return -1;
             }
 
-            std::vector< vm::instrs::code_block_t > new_code_blocks;
+            std::vector< vm::instrs::code_block_t > code_blocks;
 
-            if ( !emu.get_trace( new_code_blocks ) )
+            if ( !emu.get_trace( code_blocks ) )
             {
                 std::printf( "[!] something failed during tracing, review the console for more information...\n" );
                 continue;
             }
 
-            std::printf( "> number of blocks = %d\n", new_code_blocks.size() );
+            std::printf( "> number of blocks = %d\n", code_blocks.size() );
 
-            for ( auto &code_block : new_code_blocks )
+            for ( auto &code_block : code_blocks )
             {
                 for ( const auto &vinstr : code_block.vinstrs )
                 {
@@ -226,8 +225,6 @@ int __cdecl main( int argc, const char *argv[] )
                     }
                 }
             }
-
-            code_blocks.insert( code_blocks.end(), new_code_blocks.begin(), new_code_blocks.end() );
         }
     }
 }
