@@ -214,7 +214,7 @@ namespace vm
 
         for ( auto &[ code_block, cpu_ctx, vm_ctx ] : code_blocks )
         {
-            code_block.vip_begin = ( code_block.vip_begin - g_vm_ctx->module_base ) + g_vm_ctx->image_base;
+            // code_block.vip_begin = ( code_block.vip_begin - g_vm_ctx->module_base ) + g_vm_ctx->image_base;
             entries.push_back( code_block );
         }
 
