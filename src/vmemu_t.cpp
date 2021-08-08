@@ -77,7 +77,7 @@ namespace vm
         }
 
         // trace the first block given the vm enter...
-        code_block_data_t code_block{ { rip }, nullptr, nullptr };
+        code_block_data_t code_block{ {}, nullptr, nullptr };
         cc_block = &code_block;
 
         std::printf( "> beginning execution at = 0x%p\n", rip );
@@ -110,7 +110,7 @@ namespace vm
                     ( _code_block.code_block.jcc.block_addr[ 1 ] - g_vm_ctx->module_base ) + g_vm_ctx->image_base;
 
                 // setup object globals so that the tracing will work...
-                code_block_data_t branch_block{ { _code_block.cpu_ctx->rip }, nullptr, nullptr };
+                code_block_data_t branch_block{ {}, nullptr, nullptr };
                 cc_block = &branch_block;
                 g_vm_ctx = _code_block.g_vm_ctx.get();
 
@@ -163,10 +163,10 @@ namespace vm
 
                 std::uintptr_t rbp = 0ull;
                 std::uint32_t branch_rva =
-                    ( _code_block.code_block.jcc.block_addr[ 1 ] - g_vm_ctx->module_base ) + g_vm_ctx->image_base;
+                    ( _code_block.code_block.jcc.block_addr[ 0 ] - g_vm_ctx->module_base ) + g_vm_ctx->image_base;
 
                 // setup object globals so that the tracing will work...
-                code_block_data_t branch_block{ { _code_block.cpu_ctx->rip }, nullptr, nullptr };
+                code_block_data_t branch_block{ {}, nullptr, nullptr };
                 cc_block = &branch_block;
                 g_vm_ctx = _code_block.g_vm_ctx.get();
 
