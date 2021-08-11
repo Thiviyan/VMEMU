@@ -222,13 +222,13 @@ namespace vm
                 {
                 case vm::instrs::jcc_type::branching:
                 {
-                    code_block.jcc.block_addr[ 0 ] =
-                        ( code_block.jcc.block_addr[ 0 ] - g_vm_ctx->module_base ) + g_vm_ctx->image_base;
+                    code_block.jcc.block_addr[ 1 ] =
+                        ( code_block.jcc.block_addr[ 1 ] - g_vm_ctx->module_base ) + g_vm_ctx->image_base;
                 }
                 case vm::instrs::jcc_type::absolute:
                 {
-                    code_block.jcc.block_addr[ 1 ] =
-                        ( code_block.jcc.block_addr[ 1 ] - g_vm_ctx->module_base ) + g_vm_ctx->image_base;
+                    code_block.jcc.block_addr[ 0 ] =
+                        ( code_block.jcc.block_addr[ 0 ] - g_vm_ctx->module_base ) + g_vm_ctx->image_base;
                     break;
                 }
                 }

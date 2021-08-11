@@ -91,8 +91,13 @@ int __cdecl main( int argc, const char *argv[] )
             std::printf( "> does this code block have a jcc? %s\n", code_block.jcc.has_jcc ? "yes" : "no" );
 
             if ( code_block.jcc.has_jcc )
-                std::printf( "> branch 1 = %p, branch 2 = %p\n", code_block.jcc.block_addr[ 0 ],
-                             code_block.jcc.block_addr[ 1 ] );
+            {
+                if ( code_block.jcc.type == vm::instrs::jcc_type::branching )
+                    std::printf( "> branch 1 = %p, branch 2 = %p\n", code_block.jcc.block_addr[ 0 ],
+                                 code_block.jcc.block_addr[ 1 ] );
+                else
+                    std::printf( "> branch 1 = %p\n", code_block.jcc.block_addr[ 0 ] );
+            }
         }
 
         std::printf( "> serializing results....\n" );
