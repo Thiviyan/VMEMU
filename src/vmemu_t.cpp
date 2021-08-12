@@ -307,6 +307,14 @@ namespace vm
             return false;
         }
 
+        if ( instr.mnemonic == ZYDIS_MNEMONIC_INT1 || instr.mnemonic == ZYDIS_MNEMONIC_INVALID )
+        {
+            obj->cc_block->code_block.jcc.has_jcc = false;
+            obj->cc_block->code_block.jcc.type = vm::instrs::jcc_type::none;
+            uc_emu_stop( uc );
+            return false;
+        }
+
         // if the native instruction is a jmp rcx/rdx... then AL will contain the vm handler
         // table index of the vm handler that the emulator is about to jmp too...
         if ( !( instr.mnemonic == ZYDIS_MNEMONIC_JMP && instr.operands[ 0 ].type == ZYDIS_OPERAND_TYPE_REGISTER &&
