@@ -92,50 +92,80 @@ int __cdecl main( int argc, const char *argv[] )
 
             if ( code_block.jcc.has_jcc )
             {
-                if ( code_block.jcc.type == vm::instrs::jcc_type::branching )
+                switch ( code_block.jcc.type )
+                {
+                case vm::instrs::jcc_type::branching:
+                {
                     std::printf( "> branch 1 = %p, branch 2 = %p\n", code_block.jcc.block_addr[ 0 ],
                                  code_block.jcc.block_addr[ 1 ] );
-                else
+                    break;
+                }
+                case vm::instrs::jcc_type::absolute:
+                {
                     std::printf( "> branch 1 = %p\n", code_block.jcc.block_addr[ 0 ] );
+                    break;
+                }
+                case vm::instrs::jcc_type::switch_case:
+                {
+                    std::printf( "> switch case blocks:\n" );
+                    for ( auto idx = 0u; idx < code_block.jcc.block_addr.size(); ++idx )
+                        std::printf( "    case block at = 0x%p\n", code_block.jcc.block_addr[ idx ] );
+                    break;
+                }
+                }
             }
         }
 
         std::printf( "> serializing results....\n" );
-        vmp2::v3::file_header file_header;
+        vmp2::v4::file_header file_header;
         file_header.magic = VMP_MAGIC;
         file_header.epoch_time = std::time( nullptr );
-        file_header.version = vmp2::version_t::v3;
+        file_header.version = vmp2::version_t::v4;
         file_header.module_base = module_base;
         file_header.image_base = image_base;
         file_header.vm_entry_rva = vm_entry_rva;
         file_header.module_offset = sizeof file_header;
         file_header.module_size = image_size;
-        file_header.code_block_offset = image_size + sizeof file_header;
-        file_header.code_block_count = code_blocks.size();
+        file_header.rtn_count = 1;
+        file_header.rtn_offset = image_size + sizeof file_header;
 
+        vmp2::v4::rtn_t rtn{ code_blocks.size() };
         std::ofstream output( parser.get< std::string >( "out" ), std::ios::binary );
         output.write( reinterpret_cast< const char * >( &file_header ), sizeof file_header );
         output.write( reinterpret_cast< const char * >( module_base ), image_size );
+        output.write( reinterpret_cast< const char * >( &rtn ), sizeof vmp2::v4::rtn_t::code_block_count );
 
         for ( const auto &code_block : code_blocks )
         {
-            const auto _code_block_size =
-                ( code_block.vinstrs.size() * sizeof vm::instrs::virt_instr_t ) + sizeof vmp2::v3::code_block_t;
+            const auto _code_block_size = sizeof vmp2::v4::code_block_t + ( code_block.jcc.block_addr.size() * 8 );
 
-            vmp2::v3::code_block_t *_code_block =
-                reinterpret_cast< vmp2::v3::code_block_t * >( malloc( _code_block_size ) );
+            vmp2::v4::code_block_t *_code_block =
+                reinterpret_cast< vmp2::v4::code_block_t * >( malloc( _code_block_size ) );
 
+            // serialize block meta data...
             _code_block->vip_begin = code_block.vip_begin;
-            _code_block->jcc = code_block.jcc;
             _code_block->next_block_offset = _code_block_size;
-            _code_block->vinstr_count = code_block.vinstrs.size();
+            _code_block->jcc.num_block_addrs = code_block.jcc.block_addr.size();
+
+            // serialize jcc data...
+            for ( auto idx = 0u; idx < code_block.jcc.block_addr.size(); ++idx )
+                _code_block->jcc.block_addr[ idx ] = code_block.jcc.block_addr[ idx ];
+
+            output.write( reinterpret_cast< const char * >( _code_block ),
+                          sizeof vmp2::v4::code_block_t + ( code_block.jcc.block_addr.size() * 8 ) );
+
+            // serialize virtual instructions...
+            auto vinstr_count = ( std::uint32_t )code_block.vinstrs.size();
+            output.write( reinterpret_cast< const char * >( &vinstr_count ), sizeof vinstr_count );
 
             for ( auto idx = 0u; idx < code_block.vinstrs.size(); ++idx )
-                _code_block->vinstr[ idx ] = code_block.vinstrs[ idx ];
+            {
+                const auto& vinstr = code_block.vinstrs[ idx ];
+                output.write( reinterpret_cast< const char * >( &vinstr ), sizeof vinstr );
+            }
 
-            output.write( reinterpret_cast< const char * >( _code_block ), _code_block_size );
+            free( _code_block );
         }
-
         output.close();
     }
     else if ( parser.exists( "unpack" ) && parser.exists( "out" ) )
