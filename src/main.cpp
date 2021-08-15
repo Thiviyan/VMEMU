@@ -137,8 +137,8 @@ int __cdecl main( int argc, const char *argv[] )
         std::ofstream output( parser.get< std::string >( "out" ), std::ios::binary );
         output.write( reinterpret_cast< const char * >( &file_header ), sizeof file_header );
         output.write( reinterpret_cast< const char * >( module_base ), image_size );
-        output.write( reinterpret_cast< const char * >( &rtn ), sizeof vmp2::v4::rtn_t::code_block_count );
 
+        std::vector< vmp2::v4::code_block_t * > vmp2_blocks;
         for ( const auto &code_block : code_blocks )
         {
             const auto _code_block_size = sizeof vmp2::v4::code_block_t + ( code_block.jcc.block_addr.size() * 8 ) +
@@ -166,9 +166,24 @@ int __cdecl main( int argc, const char *argv[] )
             for ( auto idx = 0u; idx < code_block.vinstrs.size(); ++idx )
                 block_vinstrs[ idx ] = code_block.vinstrs[ idx ];
 
-            output.write( reinterpret_cast< const char * >( _code_block ), _code_block_size );
-            free( _code_block );
+            vmp2_blocks.push_back( _code_block );
         }
+
+        std::size_t code_blocks_size = sizeof( vmp2::v4::rtn_t::size ) + sizeof( vmp2::v4::rtn_t::code_block_count );
+        std::for_each( vmp2_blocks.begin(), vmp2_blocks.end(), [ & ]( vmp2::v4::code_block_t *vmp2_block ) -> void {
+            code_blocks_size += vmp2_block->next_block_offset;
+        } );
+
+        rtn.size = code_blocks_size;
+        rtn.code_block_count = vmp2_blocks.size();
+
+        output.write( reinterpret_cast< const char * >( &rtn ),
+                      sizeof( vmp2::v4::rtn_t::size ) + sizeof( vmp2::v4::rtn_t::code_block_count ) );
+
+        std::for_each( vmp2_blocks.begin(), vmp2_blocks.end(), [ & ]( vmp2::v4::code_block_t *vmp2_block ) -> void {
+            output.write( reinterpret_cast< const char * >( vmp2_block ), vmp2_block->next_block_offset );
+            free( vmp2_block );
+        } );
         output.close();
     }
     else if ( parser.exists( "unpack" ) && parser.exists( "out" ) )
@@ -266,7 +281,7 @@ int __cdecl main( int argc, const char *argv[] )
         for ( auto virt_rtn : virt_rtns )
         {
             vmp2::v4::rtn_t rtn{ virt_rtn.size() };
-            output.write( reinterpret_cast< const char * >( &rtn ), sizeof vmp2::v4::rtn_t::code_block_count );
+            std::vector< vmp2::v4::code_block_t * > vmp2_blocks;
 
             for ( const auto &code_block : virt_rtn )
             {
@@ -295,9 +310,26 @@ int __cdecl main( int argc, const char *argv[] )
                 for ( auto idx = 0u; idx < code_block.vinstrs.size(); ++idx )
                     block_vinstrs[ idx ] = code_block.vinstrs[ idx ];
 
-                output.write( reinterpret_cast< const char * >( _code_block ), _code_block_size );
-                free( _code_block );
+                vmp2_blocks.push_back( _code_block );
             }
+
+            std::size_t code_blocks_size =
+                sizeof( vmp2::v4::rtn_t::size ) + sizeof( vmp2::v4::rtn_t::code_block_count );
+
+            std::for_each( vmp2_blocks.begin(), vmp2_blocks.end(), [ & ]( vmp2::v4::code_block_t *vmp2_block ) -> void {
+                code_blocks_size += vmp2_block->next_block_offset;
+            } );
+
+            rtn.size = code_blocks_size;
+            rtn.code_block_count = vmp2_blocks.size();
+
+            output.write( reinterpret_cast< const char * >( &rtn ),
+                          sizeof( vmp2::v4::rtn_t::size ) + sizeof( vmp2::v4::rtn_t::code_block_count ) );
+
+            std::for_each( vmp2_blocks.begin(), vmp2_blocks.end(), [ & ]( vmp2::v4::code_block_t *vmp2_block ) -> void {
+                output.write( reinterpret_cast< const char * >( vmp2_block ), vmp2_block->next_block_offset );
+                free( vmp2_block );
+            } );
         }
         output.close();
     }
