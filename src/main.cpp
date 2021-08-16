@@ -14,6 +14,10 @@ int __cdecl main( int argc, const char *argv[] )
     parser.add_argument().name( "--out" ).description( "output file name..." );
     parser.add_argument().name( "--unpack" ).description( "unpack a vmp2 binary..." );
     parser.add_argument()
+        .name( "--emuall" )
+        .description( "scan for all vm enters and trace all of them... this may take a few minutes..." );
+
+    parser.add_argument()
         .name( "--locateconst" )
         .description( "scan all vm enters for a specific constant value...\n" );
 
@@ -92,50 +96,98 @@ int __cdecl main( int argc, const char *argv[] )
 
             if ( code_block.jcc.has_jcc )
             {
-                if ( code_block.jcc.type == vm::instrs::jcc_type::branching )
+                switch ( code_block.jcc.type )
+                {
+                case vm::instrs::jcc_type::branching:
+                {
                     std::printf( "> branch 1 = %p, branch 2 = %p\n", code_block.jcc.block_addr[ 0 ],
                                  code_block.jcc.block_addr[ 1 ] );
-                else
+                    break;
+                }
+                case vm::instrs::jcc_type::absolute:
+                {
                     std::printf( "> branch 1 = %p\n", code_block.jcc.block_addr[ 0 ] );
+                    break;
+                }
+                case vm::instrs::jcc_type::switch_case:
+                {
+                    std::printf( "> switch case blocks:\n" );
+                    for ( auto idx = 0u; idx < code_block.jcc.block_addr.size(); ++idx )
+                        std::printf( "    case block at = 0x%p\n", code_block.jcc.block_addr[ idx ] );
+                    break;
+                }
+                }
             }
         }
 
         std::printf( "> serializing results....\n" );
-        vmp2::v3::file_header file_header;
+        vmp2::v4::file_header file_header;
         file_header.magic = VMP_MAGIC;
         file_header.epoch_time = std::time( nullptr );
-        file_header.version = vmp2::version_t::v3;
+        file_header.version = vmp2::version_t::v4;
         file_header.module_base = module_base;
         file_header.image_base = image_base;
         file_header.vm_entry_rva = vm_entry_rva;
         file_header.module_offset = sizeof file_header;
         file_header.module_size = image_size;
-        file_header.code_block_offset = image_size + sizeof file_header;
-        file_header.code_block_count = code_blocks.size();
+        file_header.rtn_count = 1;
+        file_header.rtn_offset = image_size + sizeof file_header;
 
+        vmp2::v4::rtn_t rtn;
         std::ofstream output( parser.get< std::string >( "out" ), std::ios::binary );
         output.write( reinterpret_cast< const char * >( &file_header ), sizeof file_header );
         output.write( reinterpret_cast< const char * >( module_base ), image_size );
 
+        std::vector< vmp2::v4::code_block_t * > vmp2_blocks;
         for ( const auto &code_block : code_blocks )
         {
-            const auto _code_block_size =
-                ( code_block.vinstrs.size() * sizeof vm::instrs::virt_instr_t ) + sizeof vmp2::v3::code_block_t;
+            const auto _code_block_size = sizeof vmp2::v4::code_block_t + ( code_block.jcc.block_addr.size() * 8 ) +
+                                          code_block.vinstrs.size() * sizeof vm::instrs::virt_instr_t;
 
-            vmp2::v3::code_block_t *_code_block =
-                reinterpret_cast< vmp2::v3::code_block_t * >( malloc( _code_block_size ) );
+            vmp2::v4::code_block_t *_code_block =
+                reinterpret_cast< vmp2::v4::code_block_t * >( malloc( _code_block_size ) );
 
+            // serialize block meta data...
             _code_block->vip_begin = code_block.vip_begin;
-            _code_block->jcc = code_block.jcc;
             _code_block->next_block_offset = _code_block_size;
             _code_block->vinstr_count = code_block.vinstrs.size();
+            _code_block->has_jcc = code_block.jcc.has_jcc;
+            _code_block->jcc_type = code_block.jcc.type;
+            _code_block->num_block_addrs = code_block.jcc.block_addr.size();
+
+            // serialize jcc branches...
+            for ( auto idx = 0u; idx < code_block.jcc.block_addr.size(); ++idx )
+                _code_block->branch_addr[ idx ] = code_block.jcc.block_addr[ idx ];
+
+            auto block_vinstrs = reinterpret_cast< vm::instrs::virt_instr_t * >(
+                reinterpret_cast< std::uintptr_t >( _code_block ) + sizeof vmp2::v4::code_block_t +
+                ( code_block.jcc.block_addr.size() * 8 ) );
 
             for ( auto idx = 0u; idx < code_block.vinstrs.size(); ++idx )
-                _code_block->vinstr[ idx ] = code_block.vinstrs[ idx ];
+                block_vinstrs[ idx ] = code_block.vinstrs[ idx ];
 
-            output.write( reinterpret_cast< const char * >( _code_block ), _code_block_size );
+            vmp2_blocks.push_back( _code_block );
         }
 
+        std::size_t code_blocks_size = sizeof( vmp2::v4::rtn_t::size ) + sizeof( vmp2::v4::rtn_t::code_block_count ) +
+                                       sizeof( vmp2::v4::rtn_t::vm_enter_offset );
+
+        std::for_each( vmp2_blocks.begin(), vmp2_blocks.end(), [ & ]( vmp2::v4::code_block_t *vmp2_block ) -> void {
+            code_blocks_size += vmp2_block->next_block_offset;
+        } );
+
+        rtn.size = code_blocks_size;
+        rtn.code_block_count = vmp2_blocks.size();
+        rtn.vm_enter_offset = vm_entry_rva;
+
+        output.write( reinterpret_cast< const char * >( &rtn ), sizeof( vmp2::v4::rtn_t::size ) +
+                                                                    sizeof( vmp2::v4::rtn_t::code_block_count ) +
+                                                                    sizeof( vmp2::v4::rtn_t::vm_enter_offset ) );
+
+        std::for_each( vmp2_blocks.begin(), vmp2_blocks.end(), [ & ]( vmp2::v4::code_block_t *vmp2_block ) -> void {
+            output.write( reinterpret_cast< const char * >( vmp2_block ), vmp2_block->next_block_offset );
+            free( vmp2_block );
+        } );
         output.close();
     }
     else if ( parser.exists( "unpack" ) && parser.exists( "out" ) )
@@ -166,6 +218,128 @@ int __cdecl main( int argc, const char *argv[] )
         output.write( reinterpret_cast< char * >( unpacked_bin.data() ), unpacked_bin.size() );
         output.close();
     }
+    else if ( parser.exists( "bin" ) && parser.exists( "emuall" ) && parser.exists( "out" ) )
+    {
+        const auto module_base = reinterpret_cast< std::uintptr_t >(
+            LoadLibraryExA( parser.get< std::string >( "bin" ).c_str(), NULL, DONT_RESOLVE_DLL_REFERENCES ) );
+
+        const auto image_base = umtils->image_base( parser.get< std::string >( "bin" ).c_str() );
+        const auto image_size = NT_HEADER( module_base )->OptionalHeader.SizeOfImage;
+
+        auto vm_handler_tables = vm::locate::all_handler_tables( module_base );
+        auto vm_enters = vm::locate::all_vm_enters( module_base, vm_handler_tables );
+
+        std::vector< std::pair< std::uintptr_t, std::vector< vm::instrs::code_block_t > > > virt_rtns;
+        for ( const auto &[ vm_enter_offset, encrypted_rva ] : vm_enters )
+        {
+            std::printf( "> emulating vm enter at rva = 0x%x\n", vm_enter_offset );
+            vm::ctx_t vm_ctx( module_base, image_base, image_size, vm_enter_offset );
+
+            if ( !vm_ctx.init() )
+            {
+                std::printf( "[!] failed to init vmctx... this can be for many reasons..."
+                             " try validating your vm entry rva... make sure the binary is unpacked and is"
+                             "protected with VMProtect 2...\n" );
+                return -1;
+            }
+
+            vm::emu_t emu( &vm_ctx );
+
+            if ( !emu.init() )
+            {
+                std::printf( "[!] failed to init emulator...\n" );
+                return -1;
+            }
+
+            std::vector< vm::instrs::code_block_t > code_blocks;
+
+            if ( !emu.get_trace( code_blocks ) )
+            {
+                std::printf( "[!] something failed during tracing, review the console for more information...\n" );
+                continue;
+            }
+
+            std::printf( "> number of blocks = %d\n", code_blocks.size() );
+            virt_rtns.push_back( { vm_enter_offset, code_blocks } );
+        }
+
+        std::printf( "> traced %d virtual routines...\n", virt_rtns.size() );
+        std::printf( "> serializing results....\n" );
+
+        vmp2::v4::file_header file_header;
+        file_header.magic = VMP_MAGIC;
+        file_header.epoch_time = std::time( nullptr );
+        file_header.version = vmp2::version_t::v4;
+        file_header.module_base = module_base;
+        file_header.image_base = image_base;
+        file_header.vm_entry_rva = 0ull;
+        file_header.module_offset = sizeof file_header;
+        file_header.module_size = image_size;
+        file_header.rtn_count = virt_rtns.size();
+        file_header.rtn_offset = image_size + sizeof file_header;
+
+        std::ofstream output( parser.get< std::string >( "out" ), std::ios::binary );
+        output.write( reinterpret_cast< const char * >( &file_header ), sizeof file_header );
+        output.write( reinterpret_cast< const char * >( module_base ), image_size );
+
+        for ( auto [ vm_enter_offset, virt_rtn ] : virt_rtns )
+        {
+            vmp2::v4::rtn_t rtn{ virt_rtn.size() };
+            std::vector< vmp2::v4::code_block_t * > vmp2_blocks;
+
+            for ( const auto &code_block : virt_rtn )
+            {
+                const auto _code_block_size = sizeof vmp2::v4::code_block_t + ( code_block.jcc.block_addr.size() * 8 ) +
+                                              code_block.vinstrs.size() * sizeof vm::instrs::virt_instr_t;
+
+                vmp2::v4::code_block_t *_code_block =
+                    reinterpret_cast< vmp2::v4::code_block_t * >( malloc( _code_block_size ) );
+
+                // serialize block meta data...
+                _code_block->vip_begin = code_block.vip_begin;
+                _code_block->next_block_offset = _code_block_size;
+                _code_block->vinstr_count = code_block.vinstrs.size();
+                _code_block->has_jcc = code_block.jcc.has_jcc;
+                _code_block->jcc_type = code_block.jcc.type;
+                _code_block->num_block_addrs = code_block.jcc.block_addr.size();
+
+                // serialize jcc branches...
+                for ( auto idx = 0u; idx < code_block.jcc.block_addr.size(); ++idx )
+                    _code_block->branch_addr[ idx ] = code_block.jcc.block_addr[ idx ];
+
+                auto block_vinstrs = reinterpret_cast< vm::instrs::virt_instr_t * >(
+                    reinterpret_cast< std::uintptr_t >( _code_block ) + sizeof vmp2::v4::code_block_t +
+                    ( code_block.jcc.block_addr.size() * 8 ) );
+
+                for ( auto idx = 0u; idx < code_block.vinstrs.size(); ++idx )
+                    block_vinstrs[ idx ] = code_block.vinstrs[ idx ];
+
+                vmp2_blocks.push_back( _code_block );
+            }
+
+            std::size_t code_blocks_size = sizeof( vmp2::v4::rtn_t::size ) +
+                                           sizeof( vmp2::v4::rtn_t::vm_enter_offset ) +
+                                           sizeof( vmp2::v4::rtn_t::code_block_count );
+
+            std::for_each( vmp2_blocks.begin(), vmp2_blocks.end(), [ & ]( vmp2::v4::code_block_t *vmp2_block ) -> void {
+                code_blocks_size += vmp2_block->next_block_offset;
+            } );
+
+            rtn.size = code_blocks_size;
+            rtn.code_block_count = vmp2_blocks.size();
+            rtn.vm_enter_offset = vm_enter_offset;
+
+            output.write( reinterpret_cast< const char * >( &rtn ), sizeof( vmp2::v4::rtn_t::size ) +
+                                                                        sizeof( vmp2::v4::rtn_t::code_block_count ) +
+                                                                        sizeof( vmp2::v4::rtn_t::vm_enter_offset ) );
+
+            std::for_each( vmp2_blocks.begin(), vmp2_blocks.end(), [ & ]( vmp2::v4::code_block_t *vmp2_block ) -> void {
+                output.write( reinterpret_cast< const char * >( vmp2_block ), vmp2_block->next_block_offset );
+                free( vmp2_block );
+            } );
+        }
+        output.close();
+    }
     else if ( parser.exists( "bin" ) && parser.exists( "locateconst" ) )
     {
         const auto module_base = reinterpret_cast< std::uintptr_t >(
@@ -179,15 +353,6 @@ int __cdecl main( int argc, const char *argv[] )
         auto vm_enters = vm::locate::all_vm_enters( module_base, vm_handler_tables );
 
         std::printf( "> number of vm enters = %d\n", vm_enters.size() );
-        if ( std::find_if( vm_enters.begin() + 1, vm_enters.end(),
-                           [ & ]( const std::pair< std::uint32_t, std::uint32_t > &vm_enter_data ) -> bool {
-                               return vm_enter_data.second == vm_enters[ 0 ].second;
-                           } ) != vm_enters.end() )
-        {
-            std::printf( "> optimizations can be done.\n" );
-            std::getchar();
-        }
-
         for ( const auto &[ vm_enter_offset, encrypted_rva ] : vm_enters )
         {
             std::printf( "> emulating vm enter at rva = 0x%x\n", vm_enter_offset );
