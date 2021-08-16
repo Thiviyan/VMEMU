@@ -133,7 +133,7 @@ int __cdecl main( int argc, const char *argv[] )
         file_header.rtn_count = 1;
         file_header.rtn_offset = image_size + sizeof file_header;
 
-        vmp2::v4::rtn_t rtn{ code_blocks.size() };
+        vmp2::v4::rtn_t rtn;
         std::ofstream output( parser.get< std::string >( "out" ), std::ios::binary );
         output.write( reinterpret_cast< const char * >( &file_header ), sizeof file_header );
         output.write( reinterpret_cast< const char * >( module_base ), image_size );
@@ -169,16 +169,20 @@ int __cdecl main( int argc, const char *argv[] )
             vmp2_blocks.push_back( _code_block );
         }
 
-        std::size_t code_blocks_size = sizeof( vmp2::v4::rtn_t::size ) + sizeof( vmp2::v4::rtn_t::code_block_count );
+        std::size_t code_blocks_size = sizeof( vmp2::v4::rtn_t::size ) + sizeof( vmp2::v4::rtn_t::code_block_count ) +
+                                       sizeof( vmp2::v4::rtn_t::vm_enter_offset );
+
         std::for_each( vmp2_blocks.begin(), vmp2_blocks.end(), [ & ]( vmp2::v4::code_block_t *vmp2_block ) -> void {
             code_blocks_size += vmp2_block->next_block_offset;
         } );
 
         rtn.size = code_blocks_size;
         rtn.code_block_count = vmp2_blocks.size();
+        rtn.vm_enter_offset = vm_entry_rva;
 
-        output.write( reinterpret_cast< const char * >( &rtn ),
-                      sizeof( vmp2::v4::rtn_t::size ) + sizeof( vmp2::v4::rtn_t::code_block_count ) );
+        output.write( reinterpret_cast< const char * >( &rtn ), sizeof( vmp2::v4::rtn_t::size ) +
+                                                                    sizeof( vmp2::v4::rtn_t::code_block_count ) +
+                                                                    sizeof( vmp2::v4::rtn_t::vm_enter_offset ) );
 
         std::for_each( vmp2_blocks.begin(), vmp2_blocks.end(), [ & ]( vmp2::v4::code_block_t *vmp2_block ) -> void {
             output.write( reinterpret_cast< const char * >( vmp2_block ), vmp2_block->next_block_offset );
@@ -225,7 +229,7 @@ int __cdecl main( int argc, const char *argv[] )
         auto vm_handler_tables = vm::locate::all_handler_tables( module_base );
         auto vm_enters = vm::locate::all_vm_enters( module_base, vm_handler_tables );
 
-        std::vector< std::vector< vm::instrs::code_block_t > > virt_rtns;
+        std::vector< std::pair< std::uintptr_t, std::vector< vm::instrs::code_block_t > > > virt_rtns;
         for ( const auto &[ vm_enter_offset, encrypted_rva ] : vm_enters )
         {
             std::printf( "> emulating vm enter at rva = 0x%x\n", vm_enter_offset );
@@ -256,7 +260,7 @@ int __cdecl main( int argc, const char *argv[] )
             }
 
             std::printf( "> number of blocks = %d\n", code_blocks.size() );
-            virt_rtns.push_back( code_blocks );
+            virt_rtns.push_back( { vm_enter_offset, code_blocks } );
         }
 
         std::printf( "> traced %d virtual routines...\n", virt_rtns.size() );
@@ -278,7 +282,7 @@ int __cdecl main( int argc, const char *argv[] )
         output.write( reinterpret_cast< const char * >( &file_header ), sizeof file_header );
         output.write( reinterpret_cast< const char * >( module_base ), image_size );
 
-        for ( auto virt_rtn : virt_rtns )
+        for ( auto [ vm_enter_offset, virt_rtn ] : virt_rtns )
         {
             vmp2::v4::rtn_t rtn{ virt_rtn.size() };
             std::vector< vmp2::v4::code_block_t * > vmp2_blocks;
@@ -313,8 +317,9 @@ int __cdecl main( int argc, const char *argv[] )
                 vmp2_blocks.push_back( _code_block );
             }
 
-            std::size_t code_blocks_size =
-                sizeof( vmp2::v4::rtn_t::size ) + sizeof( vmp2::v4::rtn_t::code_block_count );
+            std::size_t code_blocks_size = sizeof( vmp2::v4::rtn_t::size ) +
+                                           sizeof( vmp2::v4::rtn_t::vm_enter_offset ) +
+                                           sizeof( vmp2::v4::rtn_t::code_block_count );
 
             std::for_each( vmp2_blocks.begin(), vmp2_blocks.end(), [ & ]( vmp2::v4::code_block_t *vmp2_block ) -> void {
                 code_blocks_size += vmp2_block->next_block_offset;
@@ -322,9 +327,11 @@ int __cdecl main( int argc, const char *argv[] )
 
             rtn.size = code_blocks_size;
             rtn.code_block_count = vmp2_blocks.size();
+            rtn.vm_enter_offset = vm_enter_offset;
 
-            output.write( reinterpret_cast< const char * >( &rtn ),
-                          sizeof( vmp2::v4::rtn_t::size ) + sizeof( vmp2::v4::rtn_t::code_block_count ) );
+            output.write( reinterpret_cast< const char * >( &rtn ), sizeof( vmp2::v4::rtn_t::size ) +
+                                                                        sizeof( vmp2::v4::rtn_t::code_block_count ) +
+                                                                        sizeof( vmp2::v4::rtn_t::vm_enter_offset ) );
 
             std::for_each( vmp2_blocks.begin(), vmp2_blocks.end(), [ & ]( vmp2::v4::code_block_t *vmp2_block ) -> void {
                 output.write( reinterpret_cast< const char * >( vmp2_block ), vmp2_block->next_block_offset );
