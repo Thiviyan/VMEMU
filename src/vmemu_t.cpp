@@ -479,6 +479,7 @@ namespace vm
             obj->vip_begins.push_back( obj->cc_block->code_block.vip_begin );
         }
 
+        vinstr.value().trace_data.vm_handler_rva = ( vm_handler_addr - obj->g_vm_ctx->module_base );
         obj->cc_block->code_block.vinstrs.push_back( vinstr.value() );
 
         if ( vm_handler.profile )
