@@ -6,7 +6,7 @@
 
 # VMEmu - Virtual Machine Handler Emulation
 
-VMEmu uses unicorn to emulate x86_64 instructions which make up the virtual machine handlers. This project is extremely simple in that it will check every executed instruction in order to find any `JMP` instruction which uses a register and jumps to a vm handler. When this JMP is executed all native registers, virtual scratch registers, and the virtual stack are saved into a trace entry. Emulation ends when a VMEXIT instruction is found. This project supports multi-code path virtual instruction code and will discover all code paths, this means virtual branching (JCC's) and switch cases (jmp tables & indirect jmp tables) are fully supported. You can continue the analysis using IDA outside of the virtual machine and then use VMEmu again once execution enters back into the virtual machine. 
+VMEmu uses [unicorn-engine](https://github.com/unicorn-engine/unicorn) to emulate `x86_64` instructions which make up the virtual machine handlers. This project is extremely simple in that it will check every executed instruction in order to find any `JMP` instruction which uses a register and jumps to a vm handler. When this JMP is executed all native registers, virtual scratch registers, and the virtual stack are saved into a trace entry. Emulation ends when a VMEXIT instruction is found. This project supports multi-code path virtual instruction code and will discover all code paths, this means virtual branching (JCC's) and switch cases (jmp tables & indirect jmp tables) are fully supported. You can continue the analysis using IDA outside of the virtual machine and then use VMEmu again once execution enters back into the virtual machine. 
 
 ```
 Usage: VMEmu [options...]
