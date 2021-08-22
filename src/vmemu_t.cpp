@@ -87,6 +87,9 @@ namespace vm
             return false;
         }
 
+        if ( !cc_block )
+            return false;
+
         code_blocks.push_back( code_block );
 
         // code_blocks.size() will continue to grow as all branches are traced...
@@ -149,6 +152,9 @@ namespace vm
                     return false;
                 }
 
+                if ( !cc_block )
+                    return false;
+
                 // push back new block that has been traced...
                 code_blocks.push_back( branch_block );
 
@@ -204,6 +210,9 @@ namespace vm
                     std::printf( "> error starting emu... reason = %d\n", err );
                     return false;
                 }
+
+                if ( !cc_block )
+                    return false;
 
                 // push back new block that has been traced...
                 code_blocks.push_back( branch_block );
@@ -261,6 +270,9 @@ namespace vm
                         std::printf( "> error starting emu... reason = %d\n", err );
                         return false;
                     }
+
+                    if ( !cc_block )
+                        return false;
 
                     // push back new block that has been traced...
                     code_blocks.push_back( branch_block );
@@ -372,10 +384,9 @@ namespace vm
             return false;
         }
 
-        if ( instr.mnemonic == ZYDIS_MNEMONIC_INT1 || instr.mnemonic == ZYDIS_MNEMONIC_INVALID )
+        if ( instr.mnemonic == ZYDIS_MNEMONIC_INVALID )
         {
-            obj->cc_block->code_block.jcc.has_jcc = false;
-            obj->cc_block->code_block.jcc.type = vm::instrs::jcc_type::none;
+            obj->cc_block = nullptr;
             uc_emu_stop( uc );
             return false;
         }
@@ -427,7 +438,7 @@ namespace vm
             return false;
         }
 
-        const auto &vm_handler = obj->g_vm_ctx->vm_handlers[ vm_handler_table_idx ];
+        auto &vm_handler = obj->g_vm_ctx->vm_handlers[ vm_handler_table_idx ];
 
         if ( ( err = obj->create_entry( &vinstr_entry ) ) )
         {
@@ -448,12 +459,30 @@ namespace vm
             std::printf( "> vm handler index (%d) does not match vm handler address (%p)...\n", vm_handler_table_idx,
                          vm_handler_addr );
 
+            obj->cc_block = nullptr;
             if ( ( err = uc_emu_stop( uc ) ) )
             {
                 std::printf( "> failed to stop emulation, exiting... reason = %d\n", err );
                 exit( 0 );
             }
 
+            return false;
+        }
+
+        if ( !vm_handler.profile )
+        {
+            obj->cc_block = nullptr;
+            std::printf( "> virtual machine handler (0x%p): \n\n",
+                         ( vm_handler_addr - obj->g_vm_ctx->module_base ) + obj->g_vm_ctx->image_base );
+
+            vm::util::print( vm_handler.instrs );
+            std::printf( "\n\n" );
+
+            if ( ( err = uc_emu_stop( uc ) ) )
+            {
+                std::printf( "> failed to stop emulation, exiting... reason = %d\n", err );
+                exit( 0 );
+            }
             return false;
         }
 
