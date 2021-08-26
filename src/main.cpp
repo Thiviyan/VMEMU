@@ -256,7 +256,7 @@ int __cdecl main( int argc, const char *argv[] )
             if ( !emu.get_trace( code_blocks ) )
             {
                 std::printf( "[!] something failed during tracing, review the console for more information...\n" );
-                continue;
+                return -1;
             }
 
             std::printf( "> number of blocks = %d\n", code_blocks.size() );
@@ -282,7 +282,7 @@ int __cdecl main( int argc, const char *argv[] )
         output.write( reinterpret_cast< const char * >( &file_header ), sizeof file_header );
         output.write( reinterpret_cast< const char * >( module_base ), image_size );
 
-        for ( auto& [ vm_enter_offset, virt_rtn ] : virt_rtns )
+        for ( auto &[ vm_enter_offset, virt_rtn ] : virt_rtns )
         {
             vmp2::v4::rtn_t rtn{ virt_rtn.size() };
             std::vector< vmp2::v4::code_block_t * > vmp2_blocks;
@@ -379,7 +379,7 @@ int __cdecl main( int argc, const char *argv[] )
             if ( !emu.get_trace( code_blocks ) )
             {
                 std::printf( "[!] something failed during tracing, review the console for more information...\n" );
-                continue;
+                return -1;
             }
 
             std::printf( "> number of blocks = %d\n", code_blocks.size() );
