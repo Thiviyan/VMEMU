@@ -48,6 +48,12 @@ namespace vm
             return false;
         }
 
+        if ( ( err = uc_hook_add( uc_ctx, &int_hook, UC_HOOK_INTR, &vm::emu_t::int_callback, this, 0ull, 0ull ) ) )
+        {
+            std::printf( "> uc_hook_add error, reason = %d\n", err );
+            return false;
+        }
+
         if ( ( err = uc_hook_add( uc_ctx, &invalid_mem_hook,
                                   UC_HOOK_MEM_READ_UNMAPPED | UC_HOOK_MEM_WRITE_UNMAPPED | UC_HOOK_MEM_FETCH_UNMAPPED |
                                       UC_HOOK_INSN_INVALID,
@@ -361,6 +367,7 @@ namespace vm
 
         static std::shared_ptr< vm::ctx_t > _jmp_ctx;
         static zydis_routine_t _jmp_stream;
+        static auto inst_cnt = 0ull;
 
         static ZydisDecoder decoder;
         static ZydisFormatter formatter;
@@ -376,6 +383,7 @@ namespace vm
                  ZydisDecoderDecodeBuffer( &decoder, reinterpret_cast< void * >( address ), PAGE_4KB, &instr ) ) )
         {
             std::printf( "> failed to decode instruction at = 0x%p\n", address );
+
             if ( ( err = uc_emu_stop( uc ) ) )
             {
                 std::printf( "> failed to stop emulation, exiting... reason = %d\n", err );
@@ -391,12 +399,24 @@ namespace vm
             return false;
         }
 
+        // if there are over 4k instructions executed before a JMP is found then we are gunna stop emulation
+        // this is a sanity check to prevent inf loops...
+        if ( ++inst_cnt > 0x1000 )
+        {
+            obj->cc_block = nullptr, inst_cnt = 0ull;
+            uc_emu_stop( uc );
+            return false;
+        }
+
         // if the native instruction is a jmp rcx/rdx... then AL will contain the vm handler
         // table index of the vm handler that the emulator is about to jmp too...
         if ( !( instr.mnemonic == ZYDIS_MNEMONIC_JMP && instr.operands[ 0 ].type == ZYDIS_OPERAND_TYPE_REGISTER &&
                 ( instr.operands[ 0 ].reg.value == ZYDIS_REGISTER_RCX ||
                   instr.operands[ 0 ].reg.value == ZYDIS_REGISTER_RDX ) ) )
             return true;
+
+        // reset sanity check...
+        inst_cnt = 0ull;
 
         // extract address of vm handler table...
         switch ( instr.operands[ 0 ].reg.value )
@@ -471,19 +491,17 @@ namespace vm
 
         if ( !vm_handler.profile )
         {
-            obj->cc_block = nullptr;
-            std::printf( "> virtual machine handler (0x%p): \n\n",
+            if ( !g_force_emu )
+                obj->cc_block = nullptr;
+
+            std::printf( "> please define virtual machine handler (0x%p): \n\n",
                          ( vm_handler_addr - obj->g_vm_ctx->module_base ) + obj->g_vm_ctx->image_base );
 
             vm::util::print( vm_handler.instrs );
             std::printf( "\n\n" );
 
-            if ( ( err = uc_emu_stop( uc ) ) )
-            {
-                std::printf( "> failed to stop emulation, exiting... reason = %d\n", err );
+            if ( !g_force_emu )
                 exit( 0 );
-            }
-            return false;
         }
 
         auto vinstr = vm::instrs::get( *obj->g_vm_ctx, vinstr_entry );
@@ -609,6 +627,45 @@ namespace vm
             }
         }
         return true;
+    }
+
+    void emu_t::int_callback( uc_engine *uc, std::uint32_t intno, emu_t *obj )
+    {
+        uc_err err;
+        std::uintptr_t rip = 0ull;
+        static ZydisDecoder decoder;
+        static ZydisDecodedInstruction instr;
+
+        if ( static std::atomic< bool > once{ false }; !once.exchange( true ) )
+            ZydisDecoderInit( &decoder, ZYDIS_MACHINE_MODE_LONG_64, ZYDIS_ADDRESS_WIDTH_64 );
+
+        if ( ( err = uc_reg_read( uc, UC_X86_REG_RIP, &rip ) ) )
+        {
+            std::printf( "> failed to read rip... reason = %d\n", err );
+            return;
+        }
+
+        if ( !ZYAN_SUCCESS(
+                 ZydisDecoderDecodeBuffer( &decoder, reinterpret_cast< void * >( rip ), PAGE_4KB, &instr ) ) )
+        {
+            std::printf( "> failed to decode instruction at = 0x%p\n", rip );
+
+            if ( ( err = uc_emu_stop( uc ) ) )
+            {
+                std::printf( "> failed to stop emulation, exiting... reason = %d\n", err );
+                exit( 0 );
+            }
+            return;
+        }
+
+        // advance rip over the instruction that caused the exception...
+        rip += instr.length;
+
+        if ( ( err = uc_reg_write( uc, UC_X86_REG_RIP, &rip ) ) )
+        {
+            std::printf( "> failed to write rip... reason = %d\n", err );
+            return;
+        }
     }
 
     void emu_t::invalid_mem( uc_engine *uc, uc_mem_type type, uint64_t address, int size, int64_t value, emu_t *obj )

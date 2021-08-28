@@ -13,6 +13,7 @@ int __cdecl main( int argc, const char *argv[] )
     parser.add_argument().name( "--bin" ).description( "path to unpacked virtualized binary..." );
     parser.add_argument().name( "--out" ).description( "output file name..." );
     parser.add_argument().name( "--unpack" ).description( "unpack a vmp2 binary..." );
+    parser.add_argument().names( { "-f", "--force" } ).description( "force emulation of unknown vm handlers...\n" );
     parser.add_argument()
         .name( "--emuall" )
         .description( "scan for all vm enters and trace all of them... this may take a few minutes..." );
@@ -37,6 +38,7 @@ int __cdecl main( int argc, const char *argv[] )
     }
 
     auto umtils = xtils::um_t::get_instance();
+    vm::g_force_emu = parser.exists( "force" );
 
     if ( !parser.exists( "unpack" ) && parser.exists( "vmentry" ) && parser.exists( "bin" ) && parser.exists( "out" ) )
     {
@@ -256,7 +258,7 @@ int __cdecl main( int argc, const char *argv[] )
             if ( !emu.get_trace( code_blocks ) )
             {
                 std::printf( "[!] something failed during tracing, review the console for more information...\n" );
-                return -1;
+                continue;
             }
 
             std::printf( "> number of blocks = %d\n", code_blocks.size() );
