@@ -93,10 +93,8 @@ namespace vm
             return false;
         }
 
-        if ( !cc_block )
-            return false;
-
-        code_blocks.push_back( code_block );
+        if ( cc_block )
+            code_blocks.push_back( code_block );
 
         // code_blocks.size() will continue to grow as all branches are traced...
         // when idx is > code_blocks.size() then we have traced all branches...
@@ -110,118 +108,114 @@ namespace vm
             {
             case vm::instrs::jcc_type::branching:
             {
-                if ( std::find( vip_begins.begin(), vip_begins.end(), _code_block.code_block.jcc.block_addr[ 1 ] ) !=
+                if ( std::find( vip_begins.begin(), vip_begins.end(), _code_block.code_block.jcc.block_addr[ 1 ] ) ==
                      vip_begins.end() )
-                    continue;
-
-                std::uintptr_t rbp = 0ull;
-                std::uint32_t branch_rva =
-                    ( _code_block.code_block.jcc.block_addr[ 1 ] - g_vm_ctx->module_base ) + g_vm_ctx->image_base;
-
-                // setup object globals so that the tracing will work...
-                code_block_data_t branch_block{ {}, nullptr, nullptr };
-                cc_block = &branch_block;
-                g_vm_ctx = _code_block.g_vm_ctx.get();
-
-                // restore register values...
-                if ( ( err = uc_context_restore( uc_ctx, _code_block.cpu_ctx->context ) ) )
                 {
-                    std::printf( "> failed to restore emu context... reason = %d\n", err );
-                    return false;
+                    std::uintptr_t rbp = 0ull;
+                    std::uint32_t branch_rva =
+                        ( _code_block.code_block.jcc.block_addr[ 1 ] - g_vm_ctx->module_base ) + g_vm_ctx->image_base;
+
+                    // setup object globals so that the tracing will work...
+                    code_block_data_t branch_block{ {}, nullptr, nullptr };
+                    cc_block = &branch_block;
+                    g_vm_ctx = _code_block.g_vm_ctx.get();
+
+                    // restore register values...
+                    if ( ( err = uc_context_restore( uc_ctx, _code_block.cpu_ctx->context ) ) )
+                    {
+                        std::printf( "> failed to restore emu context... reason = %d\n", err );
+                        return false;
+                    }
+
+                    // restore stack values...
+                    if ( ( err = uc_mem_write( uc_ctx, STACK_BASE, _code_block.cpu_ctx->stack, STACK_SIZE ) ) )
+                    {
+                        std::printf( "> failed to restore stack... reason = %d\n", err );
+                        return false;
+                    }
+
+                    // get the address in rbp (top of vsp)... then patch the branch rva...
+                    if ( ( err = uc_reg_read( uc_ctx, UC_X86_REG_RBP, &rbp ) ) )
+                    {
+                        std::printf( "> failed to read rbp... reason = %d\n", err );
+                        return false;
+                    }
+
+                    // patch the branch rva...
+                    if ( ( err = uc_mem_write( uc_ctx, rbp, &branch_rva, sizeof branch_rva ) ) )
+                    {
+                        std::printf( "> failed to patch branch rva... reason = %d\n", err );
+                        return false;
+                    }
+
+                    std::printf( "> beginning execution at = 0x%p\n", _code_block.cpu_ctx->rip );
+                    if ( ( err = uc_emu_start( uc_ctx, _code_block.cpu_ctx->rip, 0ull, 0ull, 0ull ) ) )
+                    {
+                        std::printf( "> error starting emu... reason = %d\n", err );
+                        return false;
+                    }
+
+                    if ( cc_block )
+                        // push back new block that has been traced...
+                        code_blocks.push_back( branch_block );
                 }
-
-                // restore stack values...
-                if ( ( err = uc_mem_write( uc_ctx, STACK_BASE, _code_block.cpu_ctx->stack, STACK_SIZE ) ) )
-                {
-                    std::printf( "> failed to restore stack... reason = %d\n", err );
-                    return false;
-                }
-
-                // get the address in rbp (top of vsp)... then patch the branch rva...
-                if ( ( err = uc_reg_read( uc_ctx, UC_X86_REG_RBP, &rbp ) ) )
-                {
-                    std::printf( "> failed to read rbp... reason = %d\n", err );
-                    return false;
-                }
-
-                // patch the branch rva...
-                if ( ( err = uc_mem_write( uc_ctx, rbp, &branch_rva, sizeof branch_rva ) ) )
-                {
-                    std::printf( "> failed to patch branch rva... reason = %d\n", err );
-                    return false;
-                }
-
-                std::printf( "> beginning execution at = 0x%p\n", _code_block.cpu_ctx->rip );
-                if ( ( err = uc_emu_start( uc_ctx, _code_block.cpu_ctx->rip, 0ull, 0ull, 0ull ) ) )
-                {
-                    std::printf( "> error starting emu... reason = %d\n", err );
-                    return false;
-                }
-
-                if ( !cc_block )
-                    return false;
-
-                // push back new block that has been traced...
-                code_blocks.push_back( branch_block );
-
                 // drop down and execute the absolute case as well since that
                 // will trace the first branch...
             }
             case vm::instrs::jcc_type::absolute:
             {
-                if ( std::find( vip_begins.begin(), vip_begins.end(), _code_block.code_block.jcc.block_addr[ 0 ] ) !=
+                if ( std::find( vip_begins.begin(), vip_begins.end(), _code_block.code_block.jcc.block_addr[ 0 ] ) ==
                      vip_begins.end() )
-                    continue;
-
-                std::uintptr_t rbp = 0ull;
-                std::uint32_t branch_rva =
-                    ( _code_block.code_block.jcc.block_addr[ 0 ] - g_vm_ctx->module_base ) + g_vm_ctx->image_base;
-
-                // setup object globals so that the tracing will work...
-                code_block_data_t branch_block{ {}, nullptr, nullptr };
-                cc_block = &branch_block;
-                g_vm_ctx = _code_block.g_vm_ctx.get();
-
-                // restore register values...
-                if ( ( err = uc_context_restore( uc_ctx, _code_block.cpu_ctx->context ) ) )
                 {
-                    std::printf( "> failed to restore emu context... reason = %d\n", err );
-                    return false;
+
+                    std::uintptr_t rbp = 0ull;
+                    std::uint32_t branch_rva =
+                        ( _code_block.code_block.jcc.block_addr[ 0 ] - g_vm_ctx->module_base ) + g_vm_ctx->image_base;
+
+                    // setup object globals so that the tracing will work...
+                    code_block_data_t branch_block{ {}, nullptr, nullptr };
+                    cc_block = &branch_block;
+                    g_vm_ctx = _code_block.g_vm_ctx.get();
+
+                    // restore register values...
+                    if ( ( err = uc_context_restore( uc_ctx, _code_block.cpu_ctx->context ) ) )
+                    {
+                        std::printf( "> failed to restore emu context... reason = %d\n", err );
+                        return false;
+                    }
+
+                    // restore stack values...
+                    if ( ( err = uc_mem_write( uc_ctx, STACK_BASE, _code_block.cpu_ctx->stack, STACK_SIZE ) ) )
+                    {
+                        std::printf( "> failed to restore stack... reason = %d\n", err );
+                        return false;
+                    }
+
+                    // get the address in rbp (top of vsp)... then patch the branch rva...
+                    if ( ( err = uc_reg_read( uc_ctx, UC_X86_REG_RBP, &rbp ) ) )
+                    {
+                        std::printf( "> failed to read rbp... reason = %d\n", err );
+                        return false;
+                    }
+
+                    // patch the branch rva...
+                    if ( ( err = uc_mem_write( uc_ctx, rbp, &branch_rva, sizeof branch_rva ) ) )
+                    {
+                        std::printf( "> failed to patch branch rva... reason = %d\n", err );
+                        return false;
+                    }
+
+                    std::printf( "> beginning execution at = 0x%p\n", _code_block.cpu_ctx->rip );
+                    if ( ( err = uc_emu_start( uc_ctx, _code_block.cpu_ctx->rip, 0ull, 0ull, 0ull ) ) )
+                    {
+                        std::printf( "> error starting emu... reason = %d\n", err );
+                        return false;
+                    }
+
+                    if ( cc_block )
+                        // push back new block that has been traced...
+                        code_blocks.push_back( branch_block );
                 }
-
-                // restore stack values...
-                if ( ( err = uc_mem_write( uc_ctx, STACK_BASE, _code_block.cpu_ctx->stack, STACK_SIZE ) ) )
-                {
-                    std::printf( "> failed to restore stack... reason = %d\n", err );
-                    return false;
-                }
-
-                // get the address in rbp (top of vsp)... then patch the branch rva...
-                if ( ( err = uc_reg_read( uc_ctx, UC_X86_REG_RBP, &rbp ) ) )
-                {
-                    std::printf( "> failed to read rbp... reason = %d\n", err );
-                    return false;
-                }
-
-                // patch the branch rva...
-                if ( ( err = uc_mem_write( uc_ctx, rbp, &branch_rva, sizeof branch_rva ) ) )
-                {
-                    std::printf( "> failed to patch branch rva... reason = %d\n", err );
-                    return false;
-                }
-
-                std::printf( "> beginning execution at = 0x%p\n", _code_block.cpu_ctx->rip );
-                if ( ( err = uc_emu_start( uc_ctx, _code_block.cpu_ctx->rip, 0ull, 0ull, 0ull ) ) )
-                {
-                    std::printf( "> error starting emu... reason = %d\n", err );
-                    return false;
-                }
-
-                if ( !cc_block )
-                    return false;
-
-                // push back new block that has been traced...
-                code_blocks.push_back( branch_block );
                 break;
             }
             case vm::instrs::jcc_type::switch_case:
@@ -277,11 +271,9 @@ namespace vm
                         return false;
                     }
 
-                    if ( !cc_block )
-                        return false;
-
-                    // push back new block that has been traced...
-                    code_blocks.push_back( branch_block );
+                    if ( cc_block )
+                        // push back new block that has been traced...
+                        code_blocks.push_back( branch_block );
                 }
                 break;
             }
