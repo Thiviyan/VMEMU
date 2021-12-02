@@ -67,6 +67,9 @@ class unpack_t {
   static void invalid_mem(uc_engine *uc, uc_mem_type type, uint64_t address,
                           int size, int64_t value, unpack_t *unpack);
 
+  static void dep_read_watch(uc_engine *uc, uc_mem_type type, uint64_t address,
+                             int size, int64_t value, unpack_t *unpack);
+
   std::map<std::string, std::uintptr_t> loaded_modules;
   std::map<std::string, std::pair<std::uint32_t, iat_hook_t> > iat_hooks = {
       {"LocalAlloc", {LOCAL_ALLOC_VECTOR, &local_alloc_hook}},

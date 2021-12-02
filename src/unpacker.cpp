@@ -72,8 +72,10 @@ bool unpack_t::init(void) {
 
   auto basereloc_dir =
       win_img->get_directory(win::directory_id::directory_entry_basereloc);
+
   auto reloc_dir = reinterpret_cast<win::reloc_directory_t *>(
       basereloc_dir->rva + map_bin.data());
+
   win::reloc_block_t *reloc_block = &reloc_dir->first_block;
 
   // apply relocations to all sections...
@@ -147,7 +149,7 @@ bool unpack_t::init(void) {
 
   // execution break points on all sections that are executable but have no
   // physical size on disk...
-  std::for_each(sec_begin, sec_end, [&](win::section_header_t &header) {
+  std::for_each(sec_begin, sec_end, [&](const win::section_header_t &header) {
     if (!header.ptr_raw_data && !header.size_raw_data &&
         header.characteristics.mem_execute &&
         header.characteristics.mem_write && !header.is_discardable()) {
@@ -158,7 +160,7 @@ bool unpack_t::init(void) {
                header.virtual_address + img_base,
                header.virtual_address + header.virtual_size + img_base))) {
         std::printf("> failed to add hook... reason = %d\n", err);
-        return false;
+        return;
       }
 
       pack_section_offset = header.virtual_address + header.virtual_size;
@@ -170,7 +172,7 @@ bool unpack_t::init(void) {
                header.virtual_address + img_base,
                header.virtual_address + header.virtual_size + img_base))) {
         std::printf("> failed to add hook... reason = %d\n", err);
-        return false;
+        return;
       }
     }
   });
@@ -194,7 +196,7 @@ bool unpack_t::unpack(std::vector<std::uint8_t> &output) {
     return false;
   }
 
-  std::printf("> beginning execution at = 0x%p\n", rip);
+  std::printf("> beginning execution at = %p\n", rip);
 
   if ((err = uc_emu_start(uc_ctx, rip, 0ull, 0ull, 0ull))) {
     std::printf("> error starting emu... reason = %d\n", err);
@@ -345,6 +347,11 @@ void unpack_t::local_free_hook(uc_engine *uc_ctx, unpack_t *obj) {
   }
 }
 
+void unpack_t::dep_read_watch(uc_engine *uc, uc_mem_type type, uint64_t address,
+                              int size, int64_t value, unpack_t *unpack) {
+  std::printf("> reading address = %p, size = %d\n", address, size);
+}
+
 void unpack_t::load_library_hook(uc_engine *uc_ctx, unpack_t *obj) {
   uc_err err;
   std::uintptr_t rcx = 0ull;
@@ -359,11 +366,12 @@ void unpack_t::load_library_hook(uc_engine *uc_ctx, unpack_t *obj) {
   std::printf("> LoadLibraryA(\"%s\")\n", buff);
 
   if (!obj->loaded_modules[buff]) {
+    std::printf("> loading library from disk...\n");
     std::vector<std::uint8_t> module_data, tmp;
     if (!vm::util::open_binary_file(buff, module_data)) {
       std::printf(
           "[!] failed to open a dependency... please put %s in the same folder "
-          "as vmprofiler-cli...\n",
+          "as vmemu...\n",
           buff);
       exit(-1);
     }
@@ -372,7 +380,7 @@ void unpack_t::load_library_hook(uc_engine *uc_ctx, unpack_t *obj) {
     auto image_size = img->get_nt_headers()->optional_header.size_image;
 
     tmp.resize(image_size);
-    std::memcpy(tmp.data(), module_data.data(), 0x1000);
+    std::memcpy(tmp.data(), module_data.data(), PAGE_4KB);
     std::for_each(img->get_nt_headers()->get_sections(),
                   img->get_nt_headers()->get_sections() +
                       img->get_nt_headers()->file_header.num_sections,
@@ -385,15 +393,34 @@ void unpack_t::load_library_hook(uc_engine *uc_ctx, unpack_t *obj) {
 
     const auto module_base = reinterpret_cast<std::uintptr_t>(tmp.data());
     const auto image_base = img->get_nt_headers()->optional_header.image_base;
-    const auto alloc_addr = module_base & ~0x1000ull;
+    const auto alloc_addr = module_base & ~0xFFFull;
     obj->loaded_modules[buff] = alloc_addr;
+
+    if ((err = uc_mem_map(uc_ctx, alloc_addr, image_size, UC_PROT_ALL))) {
+      std::printf("> failed to load library... reason = %d\n", err);
+      return;
+    }
+
+    if ((err = uc_mem_write(uc_ctx, alloc_addr, tmp.data(), image_size))) {
+      std::printf("> failed to copy module into emulator... reason = %d\n",
+                  err);
+      return;
+    }
 
     if ((err = uc_reg_write(uc_ctx, UC_X86_REG_RAX, &alloc_addr))) {
       std::printf("> failed to set rax... reason = %d\n", err);
       return;
     }
+
+    obj->uc_hooks.push_back(new uc_hook);
+    uc_hook_add(uc_ctx, obj->uc_hooks.back(), UC_HOOK_MEM_READ,
+                (void *)&engine::unpack_t::dep_read_watch, obj, alloc_addr,
+                alloc_addr + image_size);
+
+    std::printf("> mapped %s to base address %p\n", buff, alloc_addr);
   } else {
     const auto alloc_addr = obj->loaded_modules[buff];
+    std::printf("> library already loaded... returning %p...\n", alloc_addr);
     if ((err = uc_reg_write(uc_ctx, UC_X86_REG_RAX, &alloc_addr))) {
       std::printf("> failed to set rax... reason = %d\n", err);
       return;
@@ -427,21 +454,12 @@ bool unpack_t::iat_dispatcher(uc_engine *uc, uint64_t address, uint32_t size,
 
 bool unpack_t::code_exec_callback(uc_engine *uc, uint64_t address,
                                   uint32_t size, unpack_t *unpack) {
-  static ZydisDecoder decoder;
-  static ZydisFormatter formatter;
   static ZydisDecodedInstruction instr;
-
-  if (static std::atomic<bool> once{false}; !once.exchange(true)) {
-    ZydisDecoderInit(&decoder, ZYDIS_MACHINE_MODE_LONG_64,
-                     ZYDIS_ADDRESS_WIDTH_64);
-    ZydisFormatterInit(&formatter, ZYDIS_FORMATTER_STYLE_INTEL);
-  }
-
   auto instr_ptr = reinterpret_cast<void *>(unpack->map_bin.data() +
                                             (address - unpack->img_base));
 
-  if (ZYAN_SUCCESS(
-          ZydisDecoderDecodeBuffer(&decoder, instr_ptr, PAGE_4KB, &instr))) {
+  if (ZYAN_SUCCESS(ZydisDecoderDecodeBuffer(vm::util::g_decoder.get(),
+                                            instr_ptr, PAGE_4KB, &instr))) {
     if (instr.mnemonic == ZYDIS_MNEMONIC_CALL &&
         instr.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
         instr.operands[0].reg.value == ZYDIS_REGISTER_RAX) {
@@ -475,18 +493,22 @@ bool unpack_t::unpack_section_callback(uc_engine *uc, uc_mem_type type,
 void unpack_t::invalid_mem(uc_engine *uc, uc_mem_type type, uint64_t address,
                            int size, int64_t value, unpack_t *unpack) {
   switch (type) {
-    case UC_MEM_READ_UNMAPPED:
-      std::printf(">>> reading invalid memory at address = 0x%p, size = 0x%x\n",
+    case UC_MEM_READ_UNMAPPED: {
+      uc_mem_map(uc, address & ~0xFFFull, PAGE_4KB, UC_PROT_ALL);
+      std::printf(">>> reading invalid memory at address = %p, size = 0x%x\n",
                   address, size);
       break;
-    case UC_MEM_WRITE_UNMAPPED:
+    }
+    case UC_MEM_WRITE_UNMAPPED: {
+      uc_mem_map(uc, address & ~0xFFFull, PAGE_4KB, UC_PROT_ALL);
       std::printf(
-          ">>> writing invalid memory at address = 0x%p, size = 0x%x, val = "
+          ">>> writing invalid memory at address = %p, size = 0x%x, val = "
           "0x%x\n",
           address, size, value);
       break;
+    }
     case UC_MEM_FETCH_UNMAPPED: {
-      std::printf(">>> fetching invalid instructions at address = 0x%p\n",
+      std::printf(">>> fetching invalid instructions at address = %p\n",
                   address);
       break;
     }

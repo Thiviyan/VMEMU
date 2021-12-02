@@ -55,20 +55,54 @@ int __cdecl main(int argc, const char *argv[]) {
 
   auto img = reinterpret_cast<win::image_t<> *>(module_data.data());
   auto image_size = img->get_nt_headers()->optional_header.size_image;
+  const auto image_base = img->get_nt_headers()->optional_header.image_base;
 
-  tmp.resize(image_size);
-  std::memcpy(tmp.data(), module_data.data(), 0x1000);
+  // page align the vector allocation so that unicorn-engine is happy girl...
+  tmp.resize(image_size + PAGE_4KB);
+  const std::uintptr_t module_base =
+      reinterpret_cast<std::uintptr_t>(tmp.data()) +
+      (PAGE_4KB - (reinterpret_cast<std::uintptr_t>(tmp.data()) & 0xFFFull));
+
+  std::memcpy((void *)module_base, module_data.data(), 0x1000);
   std::for_each(img->get_nt_headers()->get_sections(),
                 img->get_nt_headers()->get_sections() +
                     img->get_nt_headers()->file_header.num_sections,
                 [&](const auto &section_header) {
-                  std::memcpy(tmp.data() + section_header.virtual_address,
-                              module_data.data() + section_header.ptr_raw_data,
-                              section_header.size_raw_data);
+                  std::memcpy(
+                      (void *)(module_base + section_header.virtual_address),
+                      module_data.data() + section_header.ptr_raw_data,
+                      section_header.size_raw_data);
                 });
 
-  const auto module_base = reinterpret_cast<std::uintptr_t>(tmp.data());
-  const auto image_base = img->get_nt_headers()->optional_header.image_base;
+  auto win_img = reinterpret_cast<win::image_t<> *>(module_base);
+
+  auto basereloc_dir =
+      win_img->get_directory(win::directory_id::directory_entry_basereloc);
+
+  auto reloc_dir = reinterpret_cast<win::reloc_directory_t *>(
+      basereloc_dir->rva + module_base);
+
+  win::reloc_block_t *reloc_block = &reloc_dir->first_block;
+
+  // apply relocations to all sections...
+  while (reloc_block->base_rva && reloc_block->size_block) {
+    std::for_each(reloc_block->begin(), reloc_block->end(),
+                  [&](win::reloc_entry_t &entry) {
+                    switch (entry.type) {
+                      case win::reloc_type_id::rel_based_dir64: {
+                        auto reloc_at = reinterpret_cast<std::uintptr_t *>(
+                            entry.offset + reloc_block->base_rva + module_base);
+
+                        *reloc_at = module_base + ((*reloc_at) - image_base);
+                        break;
+                      }
+                      default:
+                        break;
+                    }
+                  });
+
+    reloc_block = reloc_block->next();
+  }
 
   std::printf("> image base = %p, image size = %p, module base = %p\n",
               image_base, image_size, module_base);

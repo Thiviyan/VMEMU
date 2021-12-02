@@ -80,7 +80,7 @@ bool emu_t::get_trace(std::vector<vm::instrs::code_block_t> &entries) {
   code_block_data_t code_block{{}, nullptr, nullptr};
   cc_block = &code_block;
 
-  std::printf("> beginning execution at = 0x%p\n", rip);
+  std::printf("> beginning execution at = %p\n", rip);
   if ((err = uc_emu_start(uc_ctx, rip, 0ull, 0ull, 0ull))) {
     std::printf("> error starting emu... reason = %d\n", err);
     return false;
@@ -137,7 +137,7 @@ bool emu_t::get_trace(std::vector<vm::instrs::code_block_t> &entries) {
             return false;
           }
 
-          std::printf("> beginning execution at = 0x%p\n",
+          std::printf("> beginning execution at = %p\n",
                       _code_block.cpu_ctx->rip);
           if ((err = uc_emu_start(uc_ctx, _code_block.cpu_ctx->rip, 0ull, 0ull,
                                   0ull))) {
@@ -194,7 +194,7 @@ bool emu_t::get_trace(std::vector<vm::instrs::code_block_t> &entries) {
             return false;
           }
 
-          std::printf("> beginning execution at = 0x%p\n",
+          std::printf("> beginning execution at = %p\n",
                       _code_block.cpu_ctx->rip);
           if ((err = uc_emu_start(uc_ctx, _code_block.cpu_ctx->rip, 0ull, 0ull,
                                   0ull))) {
@@ -255,7 +255,7 @@ bool emu_t::get_trace(std::vector<vm::instrs::code_block_t> &entries) {
             return false;
           }
 
-          std::printf("> beginning execution at = 0x%p\n",
+          std::printf("> beginning execution at = %p\n",
                       _code_block.cpu_ctx->rip);
           if ((err = uc_emu_start(uc_ctx, _code_block.cpu_ctx->rip, 0ull, 0ull,
                                   0ull))) {
@@ -351,19 +351,11 @@ bool emu_t::code_exec_callback(uc_engine *uc, uint64_t address, uint32_t size,
   static std::shared_ptr<vm::ctx_t> _jmp_ctx;
   static zydis_routine_t _jmp_stream;
   static auto inst_cnt = 0ull;
-
-  static ZydisDecoder decoder;
-  static ZydisFormatter formatter;
   static ZydisDecodedInstruction instr;
 
-  if (static std::atomic<bool> once{false}; !once.exchange(true)) {
-    ZydisDecoderInit(&decoder, ZYDIS_MACHINE_MODE_LONG_64,
-                     ZYDIS_ADDRESS_WIDTH_64);
-    ZydisFormatterInit(&formatter, ZYDIS_FORMATTER_STYLE_INTEL);
-  }
-
-  if (!ZYAN_SUCCESS(ZydisDecoderDecodeBuffer(
-          &decoder, reinterpret_cast<void *>(address), PAGE_4KB, &instr))) {
+  if (!ZYAN_SUCCESS(ZydisDecoderDecodeBuffer(vm::util::g_decoder.get(),
+                                             reinterpret_cast<void *>(address),
+                                             PAGE_4KB, &instr))) {
     std::printf("> failed to decode instruction at = 0x%p\n", address);
 
     if ((err = uc_emu_stop(uc))) {
@@ -385,6 +377,23 @@ bool emu_t::code_exec_callback(uc_engine *uc, uint64_t address, uint32_t size,
     obj->cc_block = nullptr, inst_cnt = 0ull;
     uc_emu_stop(uc);
     return false;
+  }
+
+  // skip calls entirely since the virtual machine will execute to make calls...
+  // only time calls legit happen are with the CALL handler used only by the
+  // packer...
+  if (instr.mnemonic == ZYDIS_MNEMONIC_CALL &&
+      instr.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
+      instr.operands[0].reg.value == ZYDIS_REGISTER_RAX) {
+    std::uintptr_t rax = 0u, rip = 0u;
+    uc_reg_read(uc, UC_X86_REG_RAX, &rax);
+    uc_reg_read(uc, UC_X86_REG_RIP, &rip);
+
+    if (rax > obj->g_vm_ctx->module_base + obj->img_size ||
+        rax < obj->g_vm_ctx->module_base) {
+      rip += instr.length;
+      uc_reg_write(uc, UC_X86_REG_RIP, &rip);
+    }
   }
 
   // if the native instruction is a jmp rcx/rdx... then AL will contain the vm
@@ -467,7 +476,7 @@ bool emu_t::code_exec_callback(uc_engine *uc, uint64_t address, uint32_t size,
   if (!vm_handler.profile) {
     if (!g_force_emu) obj->cc_block = nullptr;
 
-    std::printf("> please define virtual machine handler (0x%p): \n\n",
+    std::printf("> please define virtual machine handler (%p): \n\n",
                 (vm_handler_addr - obj->g_vm_ctx->module_base) +
                     obj->g_vm_ctx->image_base);
 
@@ -641,20 +650,20 @@ void emu_t::invalid_mem(uc_engine *uc, uc_mem_type type, uint64_t address,
   switch (type) {
     case UC_MEM_READ_UNMAPPED: {
       uc_mem_map(uc, address & ~0xFFFull, PAGE_4KB, UC_PROT_ALL);
-      std::printf(">>> reading invalid memory at address = 0x%p, size = 0x%x\n",
+      std::printf(">>> reading invalid memory at address = %p, size = 0x%x\n",
                   address, size);
       break;
     }
     case UC_MEM_WRITE_UNMAPPED: {
       uc_mem_map(uc, address & ~0xFFFull, PAGE_4KB, UC_PROT_ALL);
       std::printf(
-          ">>> writing invalid memory at address = 0x%p, size = 0x%x, val = "
+          ">>> writing invalid memory at address = %p, size = 0x%x, val = "
           "0x%x\n",
           address, size, value);
       break;
     }
     case UC_MEM_FETCH_UNMAPPED: {
-      std::printf(">>> fetching invalid instructions at address = 0x%p\n",
+      std::printf(">>> fetching invalid instructions at address = %p\n",
                   address);
       break;
     }
