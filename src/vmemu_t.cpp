@@ -23,6 +23,40 @@ bool emu_t::init() {
     return false;
   }
 
+  if ((err = uc_mem_map(uc_ctx, IAT_VECTOR_TABLE, PAGE_4KB, UC_PROT_ALL))) {
+    std::printf("> uc_mem_map iat vector table err = %d\n", err);
+    return false;
+  }
+
+  // init iat vector table full of 'ret' instructions...
+  auto c3_page = malloc(PAGE_4KB);
+  {
+    memset(c3_page, 0xC3, PAGE_4KB);
+
+    if ((err = uc_mem_write(uc_ctx, IAT_VECTOR_TABLE, c3_page, PAGE_4KB))) {
+      std::printf("> failed to init iat vector table...\n");
+      free(c3_page);
+      return false;
+    }
+  }
+  free(c3_page);
+
+  auto win_img = reinterpret_cast<win::image_t<> *>(g_vm_ctx->module_base);
+
+  // iat hook all imports to return...
+  for (auto import_dir = reinterpret_cast<win::import_directory_t *>(
+           win_img->get_directory(win::directory_id::directory_entry_import)
+               ->rva +
+           g_vm_ctx->module_base);
+       import_dir->rva_name; ++import_dir) {
+    for (auto iat_thunk = reinterpret_cast<win::image_thunk_data_t<> *>(
+             import_dir->rva_first_thunk + g_vm_ctx->module_base);
+         iat_thunk->address; ++iat_thunk) {
+      if (iat_thunk->is_ordinal) continue;
+      iat_thunk->function = IAT_VECTOR_TABLE;
+    }
+  }
+
   if ((err =
            uc_mem_map(uc_ctx, g_vm_ctx->module_base, img_size, UC_PROT_ALL))) {
     std::printf("> map memory failed, reason = %d\n", err);
@@ -53,7 +87,7 @@ bool emu_t::init() {
   if ((err =
            uc_hook_add(uc_ctx, &invalid_mem_hook,
                        UC_HOOK_MEM_READ_UNMAPPED | UC_HOOK_MEM_WRITE_UNMAPPED |
-                           UC_HOOK_MEM_FETCH_UNMAPPED | UC_HOOK_INSN_INVALID,
+                           UC_HOOK_MEM_FETCH_UNMAPPED,
                        (void *)&vm::emu_t::invalid_mem, this, true, false))) {
     std::printf("> uc_hook_add error, reason = %d\n", err);
     return false;
@@ -379,23 +413,6 @@ bool emu_t::code_exec_callback(uc_engine *uc, uint64_t address, uint32_t size,
     return false;
   }
 
-  // skip calls entirely since the virtual machine will execute to make calls...
-  // only time calls legit happen are with the CALL handler used only by the
-  // packer...
-  if (instr.mnemonic == ZYDIS_MNEMONIC_CALL &&
-      instr.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
-      instr.operands[0].reg.value == ZYDIS_REGISTER_RAX) {
-    std::uintptr_t rax = 0u, rip = 0u;
-    uc_reg_read(uc, UC_X86_REG_RAX, &rax);
-    uc_reg_read(uc, UC_X86_REG_RIP, &rip);
-
-    if (rax > obj->g_vm_ctx->module_base + obj->img_size ||
-        rax < obj->g_vm_ctx->module_base) {
-      rip += instr.length;
-      uc_reg_write(uc, UC_X86_REG_RIP, &rip);
-    }
-  }
-
   // if the native instruction is a jmp rcx/rdx... then AL will contain the vm
   // handler table index of the vm handler that the emulator is about to jmp
   // too...
@@ -665,6 +682,14 @@ void emu_t::invalid_mem(uc_engine *uc, uc_mem_type type, uint64_t address,
     case UC_MEM_FETCH_UNMAPPED: {
       std::printf(">>> fetching invalid instructions at address = %p\n",
                   address);
+
+      std::uintptr_t rip, rsp;
+      uc_reg_read(uc, UC_X86_REG_RSP, &rsp);
+      uc_mem_read(uc, rsp, &rip, sizeof rip);
+      rsp += 8;
+      uc_reg_write(uc, UC_X86_REG_RSP, &rsp);
+      uc_reg_write(uc, UC_X86_REG_RIP, &rip);
+      std::printf(">>> injecting return to try and recover... rip = %p\n", rip);
       break;
     }
     default:

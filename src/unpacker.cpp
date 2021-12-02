@@ -347,11 +347,6 @@ void unpack_t::local_free_hook(uc_engine *uc_ctx, unpack_t *obj) {
   }
 }
 
-void unpack_t::dep_read_watch(uc_engine *uc, uc_mem_type type, uint64_t address,
-                              int size, int64_t value, unpack_t *unpack) {
-  std::printf("> reading address = %p, size = %d\n", address, size);
-}
-
 void unpack_t::load_library_hook(uc_engine *uc_ctx, unpack_t *obj) {
   uc_err err;
   std::uintptr_t rcx = 0ull;
@@ -411,12 +406,6 @@ void unpack_t::load_library_hook(uc_engine *uc_ctx, unpack_t *obj) {
       std::printf("> failed to set rax... reason = %d\n", err);
       return;
     }
-
-    obj->uc_hooks.push_back(new uc_hook);
-    uc_hook_add(uc_ctx, obj->uc_hooks.back(), UC_HOOK_MEM_READ,
-                (void *)&engine::unpack_t::dep_read_watch, obj, alloc_addr,
-                alloc_addr + image_size);
-
     std::printf("> mapped %s to base address %p\n", buff, alloc_addr);
   } else {
     const auto alloc_addr = obj->loaded_modules[buff];
@@ -468,8 +457,9 @@ bool unpack_t::code_exec_callback(uc_engine *uc, uint64_t address,
       uc_reg_read(uc, UC_X86_REG_RIP, &rip);
 
       if (rax > unpack->img_base + unpack->img_size ||
-          rax < unpack->img_base)  // skip calls to kernel32.dll...
+          rax < unpack->img_base)  // skip calls outside the packed module...
       {
+        std::printf(">>> skipping external call to addr = %p\n", rax);
         rip += instr.length;
         uc_reg_write(uc, UC_X86_REG_RIP, &rip);
       }
