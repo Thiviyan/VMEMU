@@ -1,8 +1,10 @@
 #include <unpacker.hpp>
 
 namespace engine {
-unpack_t::unpack_t(const std::vector<std::uint8_t> &packed_bin)
-    : bin(packed_bin),
+unpack_t::unpack_t(const std::string &module_name,
+                   const std::vector<std::uint8_t> &packed_bin)
+    : module_name(module_name),
+      bin(packed_bin),
       uc_ctx(nullptr),
       heap_offset(0ull),
       pack_section_offset(0ull) {
@@ -99,7 +101,7 @@ bool unpack_t::init(void) {
     reloc_block = reloc_block->next();
   }
 
-  // iat hook specific function...
+  // install iat hooks...
   for (auto import_dir = reinterpret_cast<win::import_directory_t *>(
            win_img->get_directory(win::directory_id::directory_entry_import)
                ->rva +
@@ -113,9 +115,13 @@ bool unpack_t::init(void) {
       auto iat_name = reinterpret_cast<win::image_named_import_t *>(
           iat_thunk->address + map_bin.data());
 
-      if (iat_hooks.find(iat_name->name) != iat_hooks.end())
+      if (iat_hooks.find(iat_name->name) != iat_hooks.end()) {
+        std::printf("> iat hooking %s to vector table %p\n", iat_name->name,
+                    iat_hooks[iat_name->name].first + IAT_VECTOR_TABLE);
+
         iat_thunk->function =
             iat_hooks[iat_name->name].first + IAT_VECTOR_TABLE;
+      }
     }
   }
 
@@ -162,18 +168,7 @@ bool unpack_t::init(void) {
         std::printf("> failed to add hook... reason = %d\n", err);
         return;
       }
-
       pack_section_offset = header.virtual_address + header.virtual_size;
-    } else if (header.characteristics.mem_execute) {
-      uc_hooks.push_back(new uc_hook);
-      if ((err = uc_hook_add(
-               uc_ctx, uc_hooks.back(), UC_HOOK_CODE,
-               (void *)&engine::unpack_t::code_exec_callback, this,
-               header.virtual_address + img_base,
-               header.virtual_address + header.virtual_size + img_base))) {
-        std::printf("> failed to add hook... reason = %d\n", err);
-        return;
-      }
     }
   });
 
@@ -347,6 +342,115 @@ void unpack_t::local_free_hook(uc_engine *uc_ctx, unpack_t *obj) {
   }
 }
 
+void unpack_t::unmap_view_of_file_hook(uc_engine *uc, unpack_t *obj) {
+  std::uintptr_t rcx, rax = true;
+  uc_reg_read(uc, UC_X86_REG_RCX, &rcx);
+  uc_reg_write(uc, UC_X86_REG_RAX, &rax);
+  std::printf("> UnmapViewOfFile(%p)\n", rcx);
+}
+
+void unpack_t::close_handle_hook(uc_engine *uc, unpack_t *obj) {
+  std::uintptr_t rcx, rax = true;
+  uc_reg_read(uc, UC_X86_REG_RCX, &rcx);
+  uc_reg_write(uc, UC_X86_REG_RAX, &rax);
+  std::printf("> CloseHandle(%x)\n", rcx);
+}
+
+void unpack_t::get_module_file_name_w_hook(uc_engine *uc, unpack_t *obj) {
+  uc_err err;
+  std::uintptr_t rcx, rdx, r8;
+  uc_reg_read(uc, UC_X86_REG_RCX, &rcx);
+  uc_reg_read(uc, UC_X86_REG_RDX, &rdx);
+  uc_reg_read(uc, UC_X86_REG_R8, &r8);
+  std::printf("> GetModuleFileNameW(%p, %p, %d)\n", rcx, rdx, r8);
+  uc_strcpy(uc, rdx, (char *)obj->module_name.c_str());
+
+  std::uint32_t size = obj->module_name.size();
+  uc_reg_write(uc, UC_X86_REG_RAX, &size);
+}
+
+void unpack_t::create_file_w_hook(uc_engine *uc, unpack_t *obj) {
+  char buff[256];
+  std::uintptr_t rcx, rax = PACKED_FILE_HANDLE;
+  uc_reg_read(uc, UC_X86_REG_RCX, &rcx);
+  uc_strcpy(uc, buff, rcx);
+
+  std::printf("> CreateFileW(%s)\n", buff);
+  uc_reg_write(uc, UC_X86_REG_RAX, &rax);
+}
+
+void unpack_t::get_file_size_hook(uc_engine *uc, unpack_t *obj) {
+  std::uintptr_t rcx, rdx, rax;
+  uc_reg_read(uc, UC_X86_REG_RCX, &rcx);
+  uc_reg_read(uc, UC_X86_REG_RDX, &rdx);
+
+  std::printf("> GetFileSize(%x, %p)\n", rcx, rdx);
+  if (rcx == PACKED_FILE_HANDLE) {
+    rax = obj->bin.size();
+    uc_reg_write(uc, UC_X86_REG_RAX, &rax);
+  } else {
+    std::printf("> asking for file size to unknown handle = %x\n", rcx);
+    uc_emu_stop(uc);
+  }
+}
+
+void unpack_t::create_file_mapping_hook(uc_engine *uc, unpack_t *obj) {
+  std::uintptr_t rcx, r8, rax = PACKED_FILE_HANDLE;
+  uc_reg_read(uc, UC_X86_REG_RCX, &rcx);
+  uc_reg_read(uc, UC_X86_REG_R8, &r8);
+  std::printf("> CreateFileMappingW(%x, %x)\n", rcx, r8);
+  if (rcx == PACKED_FILE_HANDLE) {
+    uc_reg_write(uc, UC_X86_REG_RAX, &rax);
+  } else {
+    std::printf("> asking to create mapping for unknown handle = %x\n", rcx);
+    uc_emu_stop(uc);
+  }
+}
+
+void unpack_t::map_view_of_file_hook(uc_engine *uc, unpack_t *obj) {
+  std::uintptr_t rcx, rdx, r8, r9, rax;
+  uc_reg_read(uc, UC_X86_REG_RCX, &rcx);
+  uc_reg_read(uc, UC_X86_REG_RDX, &rdx);
+  uc_reg_read(uc, UC_X86_REG_R8, &r8);
+  uc_reg_read(uc, UC_X86_REG_R9, &r9);
+  std::printf("> MapViewOfFile(%x, %x, %x, %x)\n", rcx, rdx, r8, r9);
+  if (rcx == PACKED_FILE_HANDLE) {
+    uc_err err;
+    auto size = ((obj->bin.size() + PAGE_4KB) & ~0xFFFull);
+    if ((err =
+             uc_mem_map(uc, HEAP_BASE + obj->heap_offset, size, UC_PROT_ALL))) {
+      std::printf("> failed to allocate memory... reason = %d\n", err);
+      return;
+    }
+
+    rax = HEAP_BASE + obj->heap_offset;
+    obj->heap_offset += size;
+
+    if ((err = uc_mem_write(uc, rax, obj->bin.data(), obj->bin.size()))) {
+      std::printf("> failed to map view of file... reason = %d\n", err);
+      return;
+    }
+
+    if ((err = uc_reg_write(uc, UC_X86_REG_RAX, &rax))) {
+      std::printf("> failed to write rax... reason = %d\n", err);
+      return;
+    }
+  } else {
+    std::printf("> asking to map file for unknown handle = %x\n", rcx);
+    uc_emu_stop(uc);
+  }
+}
+
+void unpack_t::virtual_protect_hook(uc_engine *uc, unpack_t *obj) {
+  std::uintptr_t rcx, rdx, r8, r9, rax = true;
+  uc_reg_read(uc, UC_X86_REG_RCX, &rcx);
+  uc_reg_read(uc, UC_X86_REG_RDX, &rdx);
+  uc_reg_read(uc, UC_X86_REG_R8, &r8);
+  uc_reg_read(uc, UC_X86_REG_R9, &r9);
+  std::printf("> VirtualProtect(%p, %x, %x, %p)\n", rcx, rdx, r8, r9);
+  uc_reg_write(uc, UC_X86_REG_RAX, &rax);
+}
+
 void unpack_t::load_library_hook(uc_engine *uc_ctx, unpack_t *obj) {
   uc_err err;
   std::uintptr_t rcx = 0ull;
@@ -365,7 +469,7 @@ void unpack_t::load_library_hook(uc_engine *uc_ctx, unpack_t *obj) {
     std::vector<std::uint8_t> module_data, tmp;
     if (!vm::util::open_binary_file(buff, module_data)) {
       std::printf(
-          "[!] failed to open a dependency... please put %s in the same folder "
+          "> failed to open a dependency... please put %s in the same folder "
           "as vmemu...\n",
           buff);
       exit(-1);
@@ -387,9 +491,34 @@ void unpack_t::load_library_hook(uc_engine *uc_ctx, unpack_t *obj) {
                   });
 
     const auto module_base = reinterpret_cast<std::uintptr_t>(tmp.data());
+    img = reinterpret_cast<win::image_t<> *>(module_base);
     const auto image_base = img->get_nt_headers()->optional_header.image_base;
     const auto alloc_addr = module_base & ~0xFFFull;
     obj->loaded_modules[buff] = alloc_addr;
+
+    // install iat hooks...
+    for (auto import_dir = reinterpret_cast<win::import_directory_t *>(
+             img->get_directory(win::directory_id::directory_entry_import)
+                 ->rva +
+             module_base);
+         import_dir->rva_name; ++import_dir) {
+      for (auto iat_thunk = reinterpret_cast<win::image_thunk_data_t<> *>(
+               import_dir->rva_first_thunk + module_base);
+           iat_thunk->address; ++iat_thunk) {
+        if (iat_thunk->is_ordinal) continue;
+
+        auto iat_name = reinterpret_cast<win::image_named_import_t *>(
+            iat_thunk->address + module_base);
+
+        if (obj->iat_hooks.find(iat_name->name) != obj->iat_hooks.end()) {
+          std::printf("> iat hooking %s to vector table %p\n", iat_name->name,
+                      obj->iat_hooks[iat_name->name].first + IAT_VECTOR_TABLE);
+
+          iat_thunk->function =
+              obj->iat_hooks[iat_name->name].first + IAT_VECTOR_TABLE;
+        }
+      }
+    }
 
     if ((err = uc_mem_map(uc_ctx, alloc_addr, image_size, UC_PROT_ALL))) {
       std::printf("> failed to load library... reason = %d\n", err);
@@ -423,9 +552,21 @@ void unpack_t::uc_strcpy(uc_engine *uc_ctx, char *buff, std::uintptr_t addr) {
   auto idx = 0ul;
 
   do {
-    if ((err = uc_mem_read(uc_ctx, addr + idx, &i, sizeof i))) break;
-
+    if ((err = uc_mem_read(uc_ctx, addr + idx, &i, sizeof i))) {
+      std::printf("[!] error reading string byte... reason = %d\n", err);
+      break;
+    }
   } while ((buff[idx++] = i));
+}
+
+void unpack_t::uc_strcpy(uc_engine *uc, std::uintptr_t addr, char *buff) {
+  uc_err err;
+  for (char idx = 0u, c = buff[idx]; buff[idx]; ++idx, c = buff[idx]) {
+    if ((err = uc_mem_write(uc, addr + idx, &c, sizeof c))) {
+      std::printf("[!] error writing string byte... reason = %d\n", err);
+      break;
+    }
+  }
 }
 
 bool unpack_t::iat_dispatcher(uc_engine *uc, uint64_t address, uint32_t size,
@@ -433,7 +574,6 @@ bool unpack_t::iat_dispatcher(uc_engine *uc, uint64_t address, uint32_t size,
   auto vec = address - IAT_VECTOR_TABLE;
   for (auto &[iat_name, iat_hook_data] : unpack->iat_hooks) {
     if (iat_hook_data.first == vec) {
-      std::printf("> hooking import = %s\n", iat_name.c_str());
       iat_hook_data.second(uc, unpack);
       return true;
     }
@@ -441,39 +581,11 @@ bool unpack_t::iat_dispatcher(uc_engine *uc, uint64_t address, uint32_t size,
   return false;
 }
 
-bool unpack_t::code_exec_callback(uc_engine *uc, uint64_t address,
-                                  uint32_t size, unpack_t *unpack) {
-  static ZydisDecodedInstruction instr;
-  auto instr_ptr = reinterpret_cast<void *>(unpack->map_bin.data() +
-                                            (address - unpack->img_base));
-
-  if (ZYAN_SUCCESS(ZydisDecoderDecodeBuffer(vm::util::g_decoder.get(),
-                                            instr_ptr, PAGE_4KB, &instr))) {
-    if (instr.mnemonic == ZYDIS_MNEMONIC_CALL &&
-        instr.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
-        instr.operands[0].reg.value == ZYDIS_REGISTER_RAX) {
-      std::uintptr_t rax = 0u, rip = 0u;
-      uc_reg_read(uc, UC_X86_REG_RAX, &rax);
-      uc_reg_read(uc, UC_X86_REG_RIP, &rip);
-
-      if (rax > unpack->img_base + unpack->img_size ||
-          rax < unpack->img_base)  // skip calls outside the packed module...
-      {
-        std::printf(">>> skipping external call to addr = %p\n", rax);
-        rip += instr.length;
-        uc_reg_write(uc, UC_X86_REG_RIP, &rip);
-      }
-    }
-  }
-
-  return true;
-}
-
 bool unpack_t::unpack_section_callback(uc_engine *uc, uc_mem_type type,
                                        uint64_t address, int size,
                                        int64_t value, unpack_t *unpack) {
   if (address == unpack->pack_section_offset + unpack->img_base) {
-    std::printf("> dumping...\n");
+    std::printf("> last byte written to unpack section... dumping...\n");
     uc_emu_stop(uc);
     return false;
   }

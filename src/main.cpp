@@ -252,7 +252,7 @@ int __cdecl main(int argc, const char *argv[]) {
                   });
     output.close();
   } else if (parser.exists("unpack")) {
-    engine::unpack_t unpacker(module_data);
+    engine::unpack_t unpacker(parser.get<std::string>("bin"), module_data);
 
     if (!unpacker.init()) {
       std::printf("> failed to init unpacker...\n");
