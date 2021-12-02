@@ -12,16 +12,15 @@ VMEmu uses [unicorn-engine](https://github.com/unicorn-engine/unicorn) to emulat
 Usage: VMEmu [options...]
 Options:
     --vmentry              relative virtual address to a vm entry...
-    --bin                  path to unpacked virtualized binary...
-    --out                  output file name...
+    --bin                  path to unpacked virtualized binary... (Required)
+    --out                  output file name...     (Required)
     --unpack               unpack a vmp2 binary...
+    -f, --force            force emulation of unknown vm handlers...
     --emuall               scan for all vm enters and trace all of them... this may take a few minutes...
-    --locateconst          scan all vm enters for a specific constant value...
-
-    -h, --help             Shows this page
+    -h, --help             Shows this page 
 ```
 
-# Building Instructions
+# Building Instructions (Windows)
 
 Download and generate visual studios project. Ensure you have Visual Studios 2019 installed!
 
@@ -29,6 +28,26 @@ Download and generate visual studios project. Ensure you have Visual Studios 201
 git clone --recursive https://githacks.org/vmp2/vmemu.git
 cd vmemu
 cmake -B build
+```
+
+# Building Instructions (Linux)
+
+### Requirements
+
+* C++ 2020 STL (libstdc++-10-dev)
+* Clang 10 or GCC 9.X
+* CMake 3.X
+
+```
+sudo apt install clang-10 libstdc++-10-dev cmake
+```
+
+### Download & Build
+
+```
+git clone --recursive https://githacks.org/vmp2/vmemu.git && cd vmemu
+cmake -B build && cd build
+make
 ```
 
 Go into `build` and open `vmemu.sln`. Select "Release", and "x64", then build the project.
