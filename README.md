@@ -46,6 +46,10 @@ sudo apt install clang-10 libstdc++-10-dev cmake
 
 ```
 git clone --recursive https://githacks.org/vmp2/vmemu.git && cd vmemu
+
+export CC=/usr/bin/clang-10
+export CXX=/usr/bin/clang++-10
+
 cmake -B build && cd build
 make
 ```
