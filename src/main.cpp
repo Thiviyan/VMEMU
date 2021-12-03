@@ -92,7 +92,8 @@ int __cdecl main(int argc, const char *argv[]) {
                       case win::reloc_type_id::rel_based_dir64: {
                         auto reloc_at = reinterpret_cast<std::uintptr_t *>(
                             entry.offset + reloc_block->base_rva + module_base);
-
+                        std::printf("> handling reloc at = %x\n",
+                                    entry.offset + reloc_block->base_rva);
                         *reloc_at = module_base + ((*reloc_at) - image_base);
                         break;
                       }

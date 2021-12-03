@@ -273,18 +273,49 @@ bool unpack_t::unpack(std::vector<std::uint8_t> &output) {
       resize_cnt += sizeof(win::reloc_block_t) +
                     (relocs.size() * sizeof(win::reloc_entry_t));
 
-  // last block needs to contain 0 for block_rva and size_block...
-  if (resize_cnt) resize_cnt += sizeof(win::reloc_block_t);
+  auto basereloc_dir =
+      output_img->get_directory(win::directory_id::directory_entry_basereloc);
 
+  resize_cnt += sizeof(win::reloc_block_t) + basereloc_dir->size;
   output.resize(output.size() + resize_cnt);
   output_img = reinterpret_cast<win::image_t<> *>(output.data());
 
-  auto basereloc_dir =
+  basereloc_dir =
       output_img->get_directory(win::directory_id::directory_entry_basereloc);
+
   auto reloc_dir = reinterpret_cast<win::reloc_directory_t *>(
       basereloc_dir->rva + output.data());
 
-  basereloc_dir->size += resize_cnt;
+  // move .reloc section to the end of the file...
+  std::for_each(
+      output_img->get_nt_headers()->get_sections(),
+      output_img->get_nt_headers()->get_sections() +
+          output_img->get_nt_headers()->file_header.num_sections,
+      [&](coff::section_header_t &hdr) {
+        if (hdr.virtual_address == basereloc_dir->rva) {
+          hdr.virtual_size = resize_cnt;
+          hdr.size_raw_data = resize_cnt;
+          hdr.virtual_address =
+              output_img->get_nt_headers()->optional_header.size_image;
+        }
+      });
+
+  // copy .reloc section data to the end of the file...
+  std::memcpy(
+      output.data() + output_img->get_nt_headers()->optional_header.size_image,
+      output.data() + basereloc_dir->rva, basereloc_dir->size);
+
+  // update directory data to reflect this .reloc move...
+  basereloc_dir->rva = output_img->get_nt_headers()->optional_header.size_image;
+  basereloc_dir->size = resize_cnt;
+
+  // update size_image and make sure its page aligned... (round up...)
+  output_img->get_nt_headers()->optional_header.size_image += resize_cnt;
+  output_img->get_nt_headers()->optional_header.size_image =
+      (output_img->get_nt_headers()->optional_header.size_image + PAGE_4KB) &
+      ~0xFFFull;
+
+  // add new relocs to the .reloc section...
   for (const auto &[reloc_rva, relocs] : new_relocs) {
     if (has_reloc_page(reloc_rva)) continue;
 
