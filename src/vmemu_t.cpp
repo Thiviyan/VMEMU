@@ -382,16 +382,15 @@ bool emu_t::code_exec_callback(uc_engine *uc, uint64_t address, uint32_t size,
   std::uint8_t vm_handler_table_idx = 0u;
   std::uintptr_t vm_handler_addr;
 
-  static std::shared_ptr<vm::ctx_t> _jmp_ctx;
-  static zydis_routine_t _jmp_stream;
-  static auto inst_cnt = 0ull;
-  static ZydisDecodedInstruction instr;
+  static thread_local std::shared_ptr<vm::ctx_t> _jmp_ctx;
+  static thread_local zydis_routine_t _jmp_stream;
+  static thread_local auto inst_cnt = 0ull;
+  static thread_local ZydisDecodedInstruction instr;
 
   if (!ZYAN_SUCCESS(ZydisDecoderDecodeBuffer(vm::util::g_decoder.get(),
                                              reinterpret_cast<void *>(address),
                                              PAGE_4KB, &instr))) {
     std::printf("> failed to decode instruction at = 0x%p\n", address);
-
     if ((err = uc_emu_stop(uc))) {
       std::printf("> failed to stop emulation, exiting... reason = %d\n", err);
       exit(0);
@@ -408,6 +407,7 @@ bool emu_t::code_exec_callback(uc_engine *uc, uint64_t address, uint32_t size,
   // if there are over 4k instructions executed before a JMP is found then we
   // are gunna stop emulation this is a sanity check to prevent inf loops...
   if (++inst_cnt > 0x1000) {
+    std::printf("> inf loop detected... stopping emulation...\n");
     obj->cc_block = nullptr, inst_cnt = 0ull;
     uc_emu_stop(uc);
     return false;

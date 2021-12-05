@@ -1,9 +1,12 @@
 #include <cli-parser.hpp>
 #include <fstream>
 #include <iostream>
+#include <thread>
 
 #include "unpacker.hpp"
 #include "vmemu_t.hpp"
+
+#define NUM_THREADS 20
 
 int __cdecl main(int argc, const char *argv[]) {
   argparse::argument_parser_t parser("VMEmu",
@@ -92,8 +95,6 @@ int __cdecl main(int argc, const char *argv[]) {
                       case win::reloc_type_id::rel_based_dir64: {
                         auto reloc_at = reinterpret_cast<std::uintptr_t *>(
                             entry.offset + reloc_block->base_rva + module_base);
-                        std::printf("> handling reloc at = %x\n",
-                                    entry.offset + reloc_block->base_rva);
                         *reloc_at = module_base + ((*reloc_at) - image_base);
                         break;
                       }
@@ -144,7 +145,6 @@ int __cdecl main(int argc, const char *argv[]) {
     }
 
     std::printf("> number of blocks = %d\n", code_blocks.size());
-
     for (auto &code_block : code_blocks) {
       std::printf("> code block starts at = %p\n", code_block.vip_begin);
       std::printf("> number of virtual instructions = %d\n",
@@ -280,38 +280,55 @@ int __cdecl main(int argc, const char *argv[]) {
         std::pair<std::uintptr_t, std::vector<vm::instrs::code_block_t> > >
         virt_rtns;
 
+    std::vector<std::thread> threads;
     for (const auto &[vm_enter_offset, encrypted_rva, hndlr_tble] : entries) {
-      std::printf("> emulating vm enter at rva = 0x%x\n", vm_enter_offset);
-      vm::ctx_t vm_ctx(module_base, image_base, image_size, vm_enter_offset);
-
-      if (!vm_ctx.init()) {
-        std::printf(
-            "[!] failed to init vmctx... this can be for many reasons..."
-            " try validating your vm entry rva... make sure the binary is "
-            "unpacked and is"
-            "protected with VMProtect 2...\n");
-        return -1;
+      if (threads.size() == NUM_THREADS) {
+        std::for_each(threads.begin(), threads.end(),
+                      [&](std::thread &t) { t.join(); });
+        threads.clear();
       }
 
-      vm::emu_t emu(&vm_ctx);
+      threads.emplace_back(std::thread([vm_enter_offset = vm_enter_offset,
+                                        module_base = module_base,
+                                        image_base = image_base,
+                                        image_size = image_size,
+                                        &virt_rtns = virt_rtns]() {
+        std::printf("> emulating vm enter at rva = 0x%x\n", vm_enter_offset);
+        vm::ctx_t vm_ctx(module_base, image_base, image_size, vm_enter_offset);
 
-      if (!emu.init()) {
-        std::printf("[!] failed to init emulator...\n");
-        return -1;
-      }
+        if (!vm_ctx.init()) {
+          std::printf(
+              "[!] failed to init vmctx... this can be for many reasons..."
+              " try validating your vm entry rva... make sure the binary is "
+              "unpacked and is"
+              "protected with VMProtect 2...\n");
+          return;
+        }
 
-      std::vector<vm::instrs::code_block_t> code_blocks;
+        vm::emu_t emu(&vm_ctx);
 
-      if (!emu.get_trace(code_blocks)) {
-        std::printf(
-            "[!] something failed during tracing, review the console for more "
-            "information...\n");
-        continue;
-      }
+        if (!emu.init()) {
+          std::printf("[!] failed to init emulator...\n");
+          return;
+        }
 
-      std::printf("> number of blocks = %d\n", code_blocks.size());
-      virt_rtns.push_back({vm_enter_offset, code_blocks});
+        std::vector<vm::instrs::code_block_t> code_blocks;
+
+        if (!emu.get_trace(code_blocks)) {
+          std::printf(
+              "[!] something failed during tracing, review the console for "
+              "more "
+              "information...\n");
+          return;
+        }
+
+        std::printf("> number of blocks = %d\n", code_blocks.size());
+        virt_rtns.push_back({vm_enter_offset, code_blocks});
+      }));
     }
+
+    std::for_each(threads.begin(), threads.end(),
+                  [&](std::thread &t) { t.join(); });
 
     std::printf("> traced %d virtual routines...\n", virt_rtns.size());
     std::printf("> serializing results....\n");
