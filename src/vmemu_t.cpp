@@ -8,8 +8,7 @@ emu_t::emu_t(vm::ctx_t* vm_ctx)
       img_size(vm_ctx->image_size) {}
 
 emu_t::~emu_t() {
-  if (uc_ctx)
-    uc_close(uc_ctx);
+  if (uc_ctx) uc_close(uc_ctx);
 }
 
 bool emu_t::init() {
@@ -53,8 +52,7 @@ bool emu_t::init() {
     for (auto iat_thunk = reinterpret_cast<win::image_thunk_data_t<>*>(
              import_dir->rva_first_thunk + g_vm_ctx->module_base);
          iat_thunk->address; ++iat_thunk) {
-      if (iat_thunk->is_ordinal)
-        continue;
+      if (iat_thunk->is_ordinal) continue;
       iat_thunk->function = IAT_VECTOR_TABLE;
     }
   }
@@ -122,15 +120,13 @@ bool emu_t::get_trace(std::vector<vm::instrs::code_block_t>& entries) {
     return false;
   }
 
-  if (cc_block)
-    code_blocks.push_back(code_block);
+  if (cc_block) code_blocks.push_back(code_block);
 
   // code_blocks.size() will continue to grow as all branches are traced...
   // when idx is > code_blocks.size() then we have traced all branches...
   for (auto idx = 0u; idx < code_blocks.size(); ++idx) {
     const auto _code_block = code_blocks[idx];
-    if (!_code_block.code_block.jcc.has_jcc)
-      continue;
+    if (!_code_block.code_block.jcc.has_jcc) continue;
 
     switch (_code_block.code_block.jcc.type) {
       case vm::instrs::jcc_type::branching: {
@@ -379,9 +375,7 @@ uc_err emu_t::create_entry(vmp2::v2::entry_t* entry) {
   return UC_ERR_OK;
 }
 
-bool emu_t::code_exec_callback(uc_engine* uc,
-                               uint64_t address,
-                               uint32_t size,
+bool emu_t::code_exec_callback(uc_engine* uc, uint64_t address, uint32_t size,
                                emu_t* obj) {
   uc_err err;
   vmp2::v2::entry_t vinstr_entry;
@@ -497,8 +491,7 @@ bool emu_t::code_exec_callback(uc_engine* uc,
   }
 
   if (!vm_handler.profile) {
-    if (!g_force_emu)
-      obj->cc_block = nullptr;
+    if (!g_force_emu) obj->cc_block = nullptr;
 
     std::printf("> please define virtual machine handler (%p): \n\n",
                 (vm_handler_addr - obj->g_vm_ctx->module_base) +
@@ -507,8 +500,7 @@ bool emu_t::code_exec_callback(uc_engine* uc,
     vm::util::print(vm_handler.instrs);
     std::printf("\n\n");
 
-    if (!g_force_emu)
-      exit(0);
+    if (!g_force_emu) exit(0);
   }
 
   auto vinstr = vm::instrs::get(*obj->g_vm_ctx, vinstr_entry);
@@ -554,6 +546,7 @@ bool emu_t::code_exec_callback(uc_engine* uc,
         // emulated...
         auto jcc_data =
             vm::instrs::get_jcc_data(*obj->g_vm_ctx, obj->cc_block->code_block);
+
         obj->cc_block->code_block.jcc = jcc_data.value();
 
         // allocate space for the cpu context and stack...
@@ -638,22 +631,17 @@ bool emu_t::code_exec_callback(uc_engine* uc,
 void emu_t::int_callback(uc_engine* uc, std::uint32_t intno, emu_t* obj) {
   uc_err err;
   std::uintptr_t rip = 0ull;
-  static ZydisDecoder decoder;
-  static ZydisDecodedInstruction instr;
-
-  if (static std::atomic<bool> once{false}; !once.exchange(true))
-    ZydisDecoderInit(&decoder, ZYDIS_MACHINE_MODE_LONG_64,
-                     ZYDIS_ADDRESS_WIDTH_64);
+  static thread_local ZydisDecodedInstruction instr;
 
   if ((err = uc_reg_read(uc, UC_X86_REG_RIP, &rip))) {
     std::printf("> failed to read rip... reason = %d\n", err);
     return;
   }
 
-  if (!ZYAN_SUCCESS(ZydisDecoderDecodeBuffer(
-          &decoder, reinterpret_cast<void*>(rip), PAGE_4KB, &instr))) {
+  if (!ZYAN_SUCCESS(ZydisDecoderDecodeBuffer(vm::util::g_decoder.get(),
+                                             reinterpret_cast<void*>(rip),
+                                             PAGE_4KB, &instr))) {
     std::printf("> failed to decode instruction at = 0x%p\n", rip);
-
     if ((err = uc_emu_stop(uc))) {
       std::printf("> failed to stop emulation, exiting... reason = %d\n", err);
       exit(0);
@@ -661,7 +649,8 @@ void emu_t::int_callback(uc_engine* uc, std::uint32_t intno, emu_t* obj) {
     return;
   }
 
-  // advance rip over the instruction that caused the exception...
+  // advance rip over the instruction that caused the exception... this is
+  // usually a division by 0...
   rip += instr.length;
 
   if ((err = uc_reg_write(uc, UC_X86_REG_RIP, &rip))) {
@@ -670,12 +659,8 @@ void emu_t::int_callback(uc_engine* uc, std::uint32_t intno, emu_t* obj) {
   }
 }
 
-void emu_t::invalid_mem(uc_engine* uc,
-                        uc_mem_type type,
-                        uint64_t address,
-                        int size,
-                        int64_t value,
-                        emu_t* obj) {
+void emu_t::invalid_mem(uc_engine* uc, uc_mem_type type, uint64_t address,
+                        int size, int64_t value, emu_t* obj) {
   switch (type) {
     case UC_MEM_READ_UNMAPPED: {
       uc_mem_map(uc, address & ~0xFFFull, PAGE_4KB, UC_PROT_ALL);
