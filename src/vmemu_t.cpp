@@ -1,14 +1,15 @@
 #include "vmemu_t.hpp"
 
 namespace vm {
-emu_t::emu_t(vm::ctx_t *vm_ctx)
+emu_t::emu_t(vm::ctx_t* vm_ctx)
     : g_vm_ctx(vm_ctx),
       uc_ctx(nullptr),
       img_base(vm_ctx->image_base),
       img_size(vm_ctx->image_size) {}
 
 emu_t::~emu_t() {
-  if (uc_ctx) uc_close(uc_ctx);
+  if (uc_ctx)
+    uc_close(uc_ctx);
 }
 
 bool emu_t::init() {
@@ -41,18 +42,19 @@ bool emu_t::init() {
   }
   free(c3_page);
 
-  auto win_img = reinterpret_cast<win::image_t<> *>(g_vm_ctx->module_base);
+  auto win_img = reinterpret_cast<win::image_t<>*>(g_vm_ctx->module_base);
 
   // iat hook all imports to return...
-  for (auto import_dir = reinterpret_cast<win::import_directory_t *>(
+  for (auto import_dir = reinterpret_cast<win::import_directory_t*>(
            win_img->get_directory(win::directory_id::directory_entry_import)
                ->rva +
            g_vm_ctx->module_base);
        import_dir->rva_name; ++import_dir) {
-    for (auto iat_thunk = reinterpret_cast<win::image_thunk_data_t<> *>(
+    for (auto iat_thunk = reinterpret_cast<win::image_thunk_data_t<>*>(
              import_dir->rva_first_thunk + g_vm_ctx->module_base);
          iat_thunk->address; ++iat_thunk) {
-      if (iat_thunk->is_ordinal) continue;
+      if (iat_thunk->is_ordinal)
+        continue;
       iat_thunk->function = IAT_VECTOR_TABLE;
     }
   }
@@ -64,14 +66,14 @@ bool emu_t::init() {
   }
 
   if ((err = uc_mem_write(uc_ctx, g_vm_ctx->module_base,
-                          reinterpret_cast<void *>(g_vm_ctx->module_base),
+                          reinterpret_cast<void*>(g_vm_ctx->module_base),
                           img_size))) {
     std::printf("> failed to write memory... reason = %d\n", err);
     return false;
   }
 
   if ((err = uc_hook_add(uc_ctx, &code_exec_hook, UC_HOOK_CODE,
-                         (void *)&vm::emu_t::code_exec_callback, this,
+                         (void*)&vm::emu_t::code_exec_callback, this,
                          g_vm_ctx->module_base,
                          g_vm_ctx->module_base + img_size))) {
     std::printf("> uc_hook_add error, reason = %d\n", err);
@@ -79,7 +81,7 @@ bool emu_t::init() {
   }
 
   if ((err = uc_hook_add(uc_ctx, &int_hook, UC_HOOK_INTR,
-                         (void *)&vm::emu_t::int_callback, this, 0ull, 0ull))) {
+                         (void*)&vm::emu_t::int_callback, this, 0ull, 0ull))) {
     std::printf("> uc_hook_add error, reason = %d\n", err);
     return false;
   }
@@ -88,14 +90,14 @@ bool emu_t::init() {
            uc_hook_add(uc_ctx, &invalid_mem_hook,
                        UC_HOOK_MEM_READ_UNMAPPED | UC_HOOK_MEM_WRITE_UNMAPPED |
                            UC_HOOK_MEM_FETCH_UNMAPPED,
-                       (void *)&vm::emu_t::invalid_mem, this, true, false))) {
+                       (void*)&vm::emu_t::invalid_mem, this, true, false))) {
     std::printf("> uc_hook_add error, reason = %d\n", err);
     return false;
   }
   return true;
 }
 
-bool emu_t::get_trace(std::vector<vm::instrs::code_block_t> &entries) {
+bool emu_t::get_trace(std::vector<vm::instrs::code_block_t>& entries) {
   uc_err err;
   std::uintptr_t rip = g_vm_ctx->vm_entry_rva + g_vm_ctx->module_base,
                  rsp = STACK_BASE + STACK_SIZE - PAGE_4KB;
@@ -120,13 +122,15 @@ bool emu_t::get_trace(std::vector<vm::instrs::code_block_t> &entries) {
     return false;
   }
 
-  if (cc_block) code_blocks.push_back(code_block);
+  if (cc_block)
+    code_blocks.push_back(code_block);
 
   // code_blocks.size() will continue to grow as all branches are traced...
   // when idx is > code_blocks.size() then we have traced all branches...
   for (auto idx = 0u; idx < code_blocks.size(); ++idx) {
     const auto _code_block = code_blocks[idx];
-    if (!_code_block.code_block.jcc.has_jcc) continue;
+    if (!_code_block.code_block.jcc.has_jcc)
+      continue;
 
     switch (_code_block.code_block.jcc.type) {
       case vm::instrs::jcc_type::branching: {
@@ -306,7 +310,7 @@ bool emu_t::get_trace(std::vector<vm::instrs::code_block_t> &entries) {
     }
   }
 
-  for (auto &[code_block, cpu_ctx, vm_ctx] : code_blocks) {
+  for (auto& [code_block, cpu_ctx, vm_ctx] : code_blocks) {
     // convert linear virtual addresses to image based addresses...
     code_block.vip_begin =
         (code_block.vip_begin - g_vm_ctx->module_base) + g_vm_ctx->image_base;
@@ -338,7 +342,7 @@ bool emu_t::get_trace(std::vector<vm::instrs::code_block_t> &entries) {
   return true;
 }
 
-uc_err emu_t::create_entry(vmp2::v2::entry_t *entry) {
+uc_err emu_t::create_entry(vmp2::v2::entry_t* entry) {
   uc_reg_read(uc_ctx, UC_X86_REG_R15, &entry->regs.r15);
   uc_reg_read(uc_ctx, UC_X86_REG_R14, &entry->regs.r14);
   uc_reg_read(uc_ctx, UC_X86_REG_R13, &entry->regs.r13);
@@ -375,8 +379,10 @@ uc_err emu_t::create_entry(vmp2::v2::entry_t *entry) {
   return UC_ERR_OK;
 }
 
-bool emu_t::code_exec_callback(uc_engine *uc, uint64_t address, uint32_t size,
-                               emu_t *obj) {
+bool emu_t::code_exec_callback(uc_engine* uc,
+                               uint64_t address,
+                               uint32_t size,
+                               emu_t* obj) {
   uc_err err;
   vmp2::v2::entry_t vinstr_entry;
   std::uint8_t vm_handler_table_idx = 0u;
@@ -388,7 +394,7 @@ bool emu_t::code_exec_callback(uc_engine *uc, uint64_t address, uint32_t size,
   static thread_local ZydisDecodedInstruction instr;
 
   if (!ZYAN_SUCCESS(ZydisDecoderDecodeBuffer(vm::util::g_decoder.get(),
-                                             reinterpret_cast<void *>(address),
+                                             reinterpret_cast<void*>(address),
                                              PAGE_4KB, &instr))) {
     std::printf("> failed to decode instruction at = 0x%p\n", address);
     if ((err = uc_emu_stop(uc))) {
@@ -460,7 +466,7 @@ bool emu_t::code_exec_callback(uc_engine *uc, uint64_t address, uint32_t size,
     return false;
   }
 
-  auto &vm_handler = obj->g_vm_ctx->vm_handlers[vm_handler_table_idx];
+  auto& vm_handler = obj->g_vm_ctx->vm_handlers[vm_handler_table_idx];
 
   if ((err = obj->create_entry(&vinstr_entry))) {
     std::printf("> failed to create vinstr entry... reason = %d\n", err);
@@ -491,7 +497,8 @@ bool emu_t::code_exec_callback(uc_engine *uc, uint64_t address, uint32_t size,
   }
 
   if (!vm_handler.profile) {
-    if (!g_force_emu) obj->cc_block = nullptr;
+    if (!g_force_emu)
+      obj->cc_block = nullptr;
 
     std::printf("> please define virtual machine handler (%p): \n\n",
                 (vm_handler_addr - obj->g_vm_ctx->module_base) +
@@ -500,7 +507,8 @@ bool emu_t::code_exec_callback(uc_engine *uc, uint64_t address, uint32_t size,
     vm::util::print(vm_handler.instrs);
     std::printf("\n\n");
 
-    if (!g_force_emu) exit(0);
+    if (!g_force_emu)
+      exit(0);
   }
 
   auto vinstr = vm::instrs::get(*obj->g_vm_ctx, vinstr_entry);
@@ -627,7 +635,7 @@ bool emu_t::code_exec_callback(uc_engine *uc, uint64_t address, uint32_t size,
   return true;
 }
 
-void emu_t::int_callback(uc_engine *uc, std::uint32_t intno, emu_t *obj) {
+void emu_t::int_callback(uc_engine* uc, std::uint32_t intno, emu_t* obj) {
   uc_err err;
   std::uintptr_t rip = 0ull;
   static ZydisDecoder decoder;
@@ -643,7 +651,7 @@ void emu_t::int_callback(uc_engine *uc, std::uint32_t intno, emu_t *obj) {
   }
 
   if (!ZYAN_SUCCESS(ZydisDecoderDecodeBuffer(
-          &decoder, reinterpret_cast<void *>(rip), PAGE_4KB, &instr))) {
+          &decoder, reinterpret_cast<void*>(rip), PAGE_4KB, &instr))) {
     std::printf("> failed to decode instruction at = 0x%p\n", rip);
 
     if ((err = uc_emu_stop(uc))) {
@@ -662,8 +670,12 @@ void emu_t::int_callback(uc_engine *uc, std::uint32_t intno, emu_t *obj) {
   }
 }
 
-void emu_t::invalid_mem(uc_engine *uc, uc_mem_type type, uint64_t address,
-                        int size, int64_t value, emu_t *obj) {
+void emu_t::invalid_mem(uc_engine* uc,
+                        uc_mem_type type,
+                        uint64_t address,
+                        int size,
+                        int64_t value,
+                        emu_t* obj) {
   switch (type) {
     case UC_MEM_READ_UNMAPPED: {
       uc_mem_map(uc, address & ~0xFFFull, PAGE_4KB, UC_PROT_ALL);

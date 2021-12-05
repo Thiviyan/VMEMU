@@ -8,7 +8,7 @@
 
 #define NUM_THREADS 20
 
-int __cdecl main(int argc, const char *argv[]) {
+int __cdecl main(int argc, const char* argv[]) {
   argparse::argument_parser_t parser("VMEmu",
                                      "VMProtect 2 VM Handler Emulator");
   parser.add_argument()
@@ -56,7 +56,7 @@ int __cdecl main(int argc, const char *argv[]) {
     return -1;
   }
 
-  auto img = reinterpret_cast<win::image_t<> *>(module_data.data());
+  auto img = reinterpret_cast<win::image_t<>*>(module_data.data());
   auto image_size = img->get_nt_headers()->optional_header.size_image;
   const auto image_base = img->get_nt_headers()->optional_header.image_base;
 
@@ -66,34 +66,34 @@ int __cdecl main(int argc, const char *argv[]) {
       reinterpret_cast<std::uintptr_t>(tmp.data()) +
       (PAGE_4KB - (reinterpret_cast<std::uintptr_t>(tmp.data()) & 0xFFFull));
 
-  std::memcpy((void *)module_base, module_data.data(), 0x1000);
+  std::memcpy((void*)module_base, module_data.data(), 0x1000);
   std::for_each(img->get_nt_headers()->get_sections(),
                 img->get_nt_headers()->get_sections() +
                     img->get_nt_headers()->file_header.num_sections,
-                [&](const auto &section_header) {
+                [&](const auto& section_header) {
                   std::memcpy(
-                      (void *)(module_base + section_header.virtual_address),
+                      (void*)(module_base + section_header.virtual_address),
                       module_data.data() + section_header.ptr_raw_data,
                       section_header.size_raw_data);
                 });
 
-  auto win_img = reinterpret_cast<win::image_t<> *>(module_base);
+  auto win_img = reinterpret_cast<win::image_t<>*>(module_base);
 
   auto basereloc_dir =
       win_img->get_directory(win::directory_id::directory_entry_basereloc);
 
-  auto reloc_dir = reinterpret_cast<win::reloc_directory_t *>(
+  auto reloc_dir = reinterpret_cast<win::reloc_directory_t*>(
       basereloc_dir->rva + module_base);
 
-  win::reloc_block_t *reloc_block = &reloc_dir->first_block;
+  win::reloc_block_t* reloc_block = &reloc_dir->first_block;
 
   // apply relocations to all sections...
   while (reloc_block->base_rva && reloc_block->size_block) {
     std::for_each(reloc_block->begin(), reloc_block->end(),
-                  [&](win::reloc_entry_t &entry) {
+                  [&](win::reloc_entry_t& entry) {
                     switch (entry.type) {
                       case win::reloc_type_id::rel_based_dir64: {
-                        auto reloc_at = reinterpret_cast<std::uintptr_t *>(
+                        auto reloc_at = reinterpret_cast<std::uintptr_t*>(
                             entry.offset + reloc_block->base_rva + module_base);
                         *reloc_at = module_base + ((*reloc_at) - image_base);
                         break;
@@ -145,7 +145,7 @@ int __cdecl main(int argc, const char *argv[]) {
     }
 
     std::printf("> number of blocks = %d\n", code_blocks.size());
-    for (auto &code_block : code_blocks) {
+    for (auto& code_block : code_blocks) {
       std::printf("> code block starts at = %p\n", code_block.vip_begin);
       std::printf("> number of virtual instructions = %d\n",
                   code_block.vinstrs.size());
@@ -190,19 +190,19 @@ int __cdecl main(int argc, const char *argv[]) {
 
     vmp2::v4::rtn_t rtn;
     std::ofstream output(parser.get<std::string>("out"), std::ios::binary);
-    output.write(reinterpret_cast<const char *>(&file_header),
+    output.write(reinterpret_cast<const char*>(&file_header),
                  sizeof file_header);
-    output.write(reinterpret_cast<const char *>(module_base), image_size);
+    output.write(reinterpret_cast<const char*>(module_base), image_size);
 
-    std::vector<vmp2::v4::code_block_t *> vmp2_blocks;
-    for (const auto &code_block : code_blocks) {
+    std::vector<vmp2::v4::code_block_t*> vmp2_blocks;
+    for (const auto& code_block : code_blocks) {
       const auto _code_block_size =
           sizeof(vmp2::v4::code_block_t) +
           (code_block.jcc.block_addr.size() * 8) +
           code_block.vinstrs.size() * sizeof(vm::instrs::virt_instr_t);
 
-      vmp2::v4::code_block_t *_code_block =
-          reinterpret_cast<vmp2::v4::code_block_t *>(malloc(_code_block_size));
+      vmp2::v4::code_block_t* _code_block =
+          reinterpret_cast<vmp2::v4::code_block_t*>(malloc(_code_block_size));
 
       // serialize block meta data...
       _code_block->vip_begin = code_block.vip_begin;
@@ -216,7 +216,7 @@ int __cdecl main(int argc, const char *argv[]) {
       for (auto idx = 0u; idx < code_block.jcc.block_addr.size(); ++idx)
         _code_block->branch_addr[idx] = code_block.jcc.block_addr[idx];
 
-      auto block_vinstrs = reinterpret_cast<vm::instrs::virt_instr_t *>(
+      auto block_vinstrs = reinterpret_cast<vm::instrs::virt_instr_t*>(
           reinterpret_cast<std::uintptr_t>(_code_block) +
           sizeof(vmp2::v4::code_block_t) +
           (code_block.jcc.block_addr.size() * 8));
@@ -232,7 +232,7 @@ int __cdecl main(int argc, const char *argv[]) {
                                    sizeof(vmp2::v4::rtn_t::vm_enter_offset);
 
     std::for_each(vmp2_blocks.begin(), vmp2_blocks.end(),
-                  [&](vmp2::v4::code_block_t *vmp2_block) -> void {
+                  [&](vmp2::v4::code_block_t* vmp2_block) -> void {
                     code_blocks_size += vmp2_block->next_block_offset;
                   });
 
@@ -240,14 +240,14 @@ int __cdecl main(int argc, const char *argv[]) {
     rtn.code_block_count = vmp2_blocks.size();
     rtn.vm_enter_offset = vm_entry_rva;
 
-    output.write(reinterpret_cast<const char *>(&rtn),
+    output.write(reinterpret_cast<const char*>(&rtn),
                  sizeof(vmp2::v4::rtn_t::size) +
                      sizeof(vmp2::v4::rtn_t::code_block_count) +
                      sizeof(vmp2::v4::rtn_t::vm_enter_offset));
 
     std::for_each(vmp2_blocks.begin(), vmp2_blocks.end(),
-                  [&](vmp2::v4::code_block_t *vmp2_block) -> void {
-                    output.write(reinterpret_cast<const char *>(vmp2_block),
+                  [&](vmp2::v4::code_block_t* vmp2_block) -> void {
+                    output.write(reinterpret_cast<const char*>(vmp2_block),
                                  vmp2_block->next_block_offset);
                     free(vmp2_block);
                   });
@@ -269,7 +269,7 @@ int __cdecl main(int argc, const char *argv[]) {
                 parser.get<std::string>("out").c_str());
 
     std::ofstream output(parser.get<std::string>("out"), std::ios::binary);
-    output.write(reinterpret_cast<char *>(unpacked_bin.data()),
+    output.write(reinterpret_cast<char*>(unpacked_bin.data()),
                  unpacked_bin.size());
 
     output.close();
@@ -281,10 +281,10 @@ int __cdecl main(int argc, const char *argv[]) {
         virt_rtns;
 
     std::vector<std::thread> threads;
-    for (const auto &[vm_enter_offset, encrypted_rva, hndlr_tble] : entries) {
+    for (const auto& [vm_enter_offset, encrypted_rva, hndlr_tble] : entries) {
       if (threads.size() == NUM_THREADS) {
         std::for_each(threads.begin(), threads.end(),
-                      [&](std::thread &t) { t.join(); });
+                      [&](std::thread& t) { t.join(); });
         threads.clear();
       }
 
@@ -328,7 +328,7 @@ int __cdecl main(int argc, const char *argv[]) {
     }
 
     std::for_each(threads.begin(), threads.end(),
-                  [&](std::thread &t) { t.join(); });
+                  [&](std::thread& t) { t.join(); });
 
     std::printf("> traced %d virtual routines...\n", virt_rtns.size());
     std::printf("> serializing results....\n");
@@ -346,23 +346,22 @@ int __cdecl main(int argc, const char *argv[]) {
     file_header.rtn_offset = image_size + sizeof file_header;
 
     std::ofstream output(parser.get<std::string>("out"), std::ios::binary);
-    output.write(reinterpret_cast<const char *>(&file_header),
+    output.write(reinterpret_cast<const char*>(&file_header),
                  sizeof file_header);
-    output.write(reinterpret_cast<const char *>(module_base), image_size);
+    output.write(reinterpret_cast<const char*>(module_base), image_size);
 
-    for (auto &[vm_enter_offset, virt_rtn] : virt_rtns) {
+    for (auto& [vm_enter_offset, virt_rtn] : virt_rtns) {
       vmp2::v4::rtn_t rtn{(u32)virt_rtn.size()};
-      std::vector<vmp2::v4::code_block_t *> vmp2_blocks;
+      std::vector<vmp2::v4::code_block_t*> vmp2_blocks;
 
-      for (const auto &code_block : virt_rtn) {
+      for (const auto& code_block : virt_rtn) {
         const auto _code_block_size =
             sizeof(vmp2::v4::code_block_t) +
             (code_block.jcc.block_addr.size() * 8) +
             code_block.vinstrs.size() * sizeof(vm::instrs::virt_instr_t);
 
-        vmp2::v4::code_block_t *_code_block =
-            reinterpret_cast<vmp2::v4::code_block_t *>(
-                malloc(_code_block_size));
+        vmp2::v4::code_block_t* _code_block =
+            reinterpret_cast<vmp2::v4::code_block_t*>(malloc(_code_block_size));
 
         // serialize block meta data...
         _code_block->vip_begin = code_block.vip_begin;
@@ -376,7 +375,7 @@ int __cdecl main(int argc, const char *argv[]) {
         for (auto idx = 0u; idx < code_block.jcc.block_addr.size(); ++idx)
           _code_block->branch_addr[idx] = code_block.jcc.block_addr[idx];
 
-        auto block_vinstrs = reinterpret_cast<vm::instrs::virt_instr_t *>(
+        auto block_vinstrs = reinterpret_cast<vm::instrs::virt_instr_t*>(
             reinterpret_cast<std::uintptr_t>(_code_block) +
             sizeof(vmp2::v4::code_block_t) +
             (code_block.jcc.block_addr.size() * 8));
@@ -392,7 +391,7 @@ int __cdecl main(int argc, const char *argv[]) {
                                      sizeof(vmp2::v4::rtn_t::code_block_count);
 
       std::for_each(vmp2_blocks.begin(), vmp2_blocks.end(),
-                    [&](vmp2::v4::code_block_t *vmp2_block) -> void {
+                    [&](vmp2::v4::code_block_t* vmp2_block) -> void {
                       code_blocks_size += vmp2_block->next_block_offset;
                     });
 
@@ -400,14 +399,14 @@ int __cdecl main(int argc, const char *argv[]) {
       rtn.code_block_count = vmp2_blocks.size();
       rtn.vm_enter_offset = vm_enter_offset;
 
-      output.write(reinterpret_cast<const char *>(&rtn),
+      output.write(reinterpret_cast<const char*>(&rtn),
                    sizeof(vmp2::v4::rtn_t::size) +
                        sizeof(vmp2::v4::rtn_t::code_block_count) +
                        sizeof(vmp2::v4::rtn_t::vm_enter_offset));
 
       std::for_each(vmp2_blocks.begin(), vmp2_blocks.end(),
-                    [&](vmp2::v4::code_block_t *vmp2_block) -> void {
-                      output.write(reinterpret_cast<const char *>(vmp2_block),
+                    [&](vmp2::v4::code_block_t* vmp2_block) -> void {
+                      output.write(reinterpret_cast<const char*>(vmp2_block),
                                    vmp2_block->next_block_offset);
                       free(vmp2_block);
                     });

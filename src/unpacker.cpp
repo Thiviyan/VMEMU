@@ -1,24 +1,26 @@
 #include <unpacker.hpp>
 
 namespace engine {
-unpack_t::unpack_t(const std::string &module_name,
-                   const std::vector<std::uint8_t> &packed_bin)
+unpack_t::unpack_t(const std::string& module_name,
+                   const std::vector<std::uint8_t>& packed_bin)
     : module_name(module_name),
       bin(packed_bin),
       uc_ctx(nullptr),
       heap_offset(0ull),
       pack_section_offset(0ull) {
-  win_img = reinterpret_cast<win::image_t<> *>(bin.data());
+  win_img = reinterpret_cast<win::image_t<>*>(bin.data());
   img_base = win_img->get_nt_headers()->optional_header.image_base;
   img_size = win_img->get_nt_headers()->optional_header.size_image;
   std::printf("> image base = 0x%p, image size = 0x%x\n", img_base, img_size);
 }
 
 unpack_t::~unpack_t(void) {
-  if (uc_ctx) uc_close(uc_ctx);
+  if (uc_ctx)
+    uc_close(uc_ctx);
 
-  for (auto &ptr : uc_hooks)
-    if (ptr) delete ptr;
+  for (auto& ptr : uc_hooks)
+    if (ptr)
+      delete ptr;
 }
 
 bool unpack_t::init(void) {
@@ -67,7 +69,7 @@ bool unpack_t::init(void) {
                             win_img->get_nt_headers()->file_header.num_sections;
 
   std::for_each(
-      sec_begin, sec_end, [&](const win::section_header_t &sec_header) {
+      sec_begin, sec_end, [&](const win::section_header_t& sec_header) {
         memcpy(map_bin.data() + sec_header.virtual_address,
                bin.data() + sec_header.ptr_raw_data, sec_header.size_raw_data);
       });
@@ -75,19 +77,19 @@ bool unpack_t::init(void) {
   auto basereloc_dir =
       win_img->get_directory(win::directory_id::directory_entry_basereloc);
 
-  auto reloc_dir = reinterpret_cast<win::reloc_directory_t *>(
+  auto reloc_dir = reinterpret_cast<win::reloc_directory_t*>(
       basereloc_dir->rva + map_bin.data());
 
-  win::reloc_block_t *reloc_block = &reloc_dir->first_block;
+  win::reloc_block_t* reloc_block = &reloc_dir->first_block;
 
   // apply relocations to all sections...
   while (reloc_block->base_rva && reloc_block->size_block) {
     std::for_each(
         reloc_block->begin(), reloc_block->end(),
-        [&](win::reloc_entry_t &entry) {
+        [&](win::reloc_entry_t& entry) {
           switch (entry.type) {
             case win::reloc_type_id::rel_based_dir64: {
-              auto reloc_at = reinterpret_cast<std::uintptr_t *>(
+              auto reloc_at = reinterpret_cast<std::uintptr_t*>(
                   entry.offset + reloc_block->base_rva + map_bin.data());
 
               *reloc_at = img_base + ((*reloc_at) - img_base);
@@ -102,17 +104,18 @@ bool unpack_t::init(void) {
   }
 
   // install iat hooks...
-  for (auto import_dir = reinterpret_cast<win::import_directory_t *>(
+  for (auto import_dir = reinterpret_cast<win::import_directory_t*>(
            win_img->get_directory(win::directory_id::directory_entry_import)
                ->rva +
            map_bin.data());
        import_dir->rva_name; ++import_dir) {
-    for (auto iat_thunk = reinterpret_cast<win::image_thunk_data_t<> *>(
+    for (auto iat_thunk = reinterpret_cast<win::image_thunk_data_t<>*>(
              import_dir->rva_first_thunk + map_bin.data());
          iat_thunk->address; ++iat_thunk) {
-      if (iat_thunk->is_ordinal) continue;
+      if (iat_thunk->is_ordinal)
+        continue;
 
-      auto iat_name = reinterpret_cast<win::image_named_import_t *>(
+      auto iat_name = reinterpret_cast<win::image_named_import_t*>(
           iat_thunk->address + map_bin.data());
 
       if (iat_hooks.find(iat_name->name) != iat_hooks.end()) {
@@ -137,7 +140,7 @@ bool unpack_t::init(void) {
 
   uc_hooks.push_back(new uc_hook);
   if ((err = uc_hook_add(uc_ctx, uc_hooks.back(), UC_HOOK_CODE,
-                         (void *)&engine::unpack_t::iat_dispatcher, this,
+                         (void*)&engine::unpack_t::iat_dispatcher, this,
                          IAT_VECTOR_TABLE, IAT_VECTOR_TABLE + PAGE_4KB))) {
     std::printf("> uc_hook_add error, reason = %d\n", err);
     return false;
@@ -148,21 +151,21 @@ bool unpack_t::init(void) {
            uc_ctx, uc_hooks.back(),
            UC_HOOK_MEM_READ_UNMAPPED | UC_HOOK_MEM_WRITE_UNMAPPED |
                UC_HOOK_MEM_FETCH_UNMAPPED | UC_HOOK_INSN_INVALID,
-           (void *)&engine::unpack_t::invalid_mem, this, true, false))) {
+           (void*)&engine::unpack_t::invalid_mem, this, true, false))) {
     std::printf("> uc_hook_add error, reason = %d\n", err);
     return false;
   }
 
   // execution break points on all sections that are executable but have no
   // physical size on disk...
-  std::for_each(sec_begin, sec_end, [&](const win::section_header_t &header) {
+  std::for_each(sec_begin, sec_end, [&](const win::section_header_t& header) {
     if (!header.ptr_raw_data && !header.size_raw_data &&
         header.characteristics.mem_execute &&
         header.characteristics.mem_write && !header.is_discardable()) {
       uc_hooks.push_back(new uc_hook);
       if ((err = uc_hook_add(
                uc_ctx, uc_hooks.back(), UC_HOOK_CODE | UC_HOOK_MEM_WRITE,
-               (void *)&engine::unpack_t::unpack_section_callback, this,
+               (void*)&engine::unpack_t::unpack_section_callback, this,
                header.virtual_address + img_base,
                header.virtual_address + header.virtual_size + img_base))) {
         std::printf("> failed to add hook... reason = %d\n", err);
@@ -175,7 +178,7 @@ bool unpack_t::init(void) {
   return true;
 }
 
-bool unpack_t::unpack(std::vector<std::uint8_t> &output) {
+bool unpack_t::unpack(std::vector<std::uint8_t>& output) {
   uc_err err;
   auto nt_headers = win_img->get_nt_headers();
   std::uintptr_t rip = nt_headers->optional_header.entry_point + img_base,
@@ -204,21 +207,21 @@ bool unpack_t::unpack(std::vector<std::uint8_t> &output) {
     return false;
   }
 
-  auto output_img = reinterpret_cast<win::image_t<> *>(output.data());
+  auto output_img = reinterpret_cast<win::image_t<>*>(output.data());
   auto sections = output_img->get_nt_headers()->get_sections();
   auto section_cnt = output_img->get_file_header()->num_sections;
 
   // { section virtual address -> vector of section offset to reloc }
-  std::map<std::uint32_t, std::vector<std::uint16_t> > new_relocs;
+  std::map<std::uint32_t, std::vector<std::uint16_t>> new_relocs;
 
   // search executable sections for MOV RAX, 00 00 00 00 00 00 00 00...
   std::for_each(
-      sections, sections + section_cnt, [&](win::section_header_t &header) {
+      sections, sections + section_cnt, [&](win::section_header_t& header) {
         if (header.characteristics.mem_execute) {
           auto result = output.data() + header.virtual_address;
 
           do {
-            result = reinterpret_cast<std::uint8_t *>(vm::locate::sigscan(
+            result = reinterpret_cast<std::uint8_t*>(vm::locate::sigscan(
                 result,
                 header.virtual_size -
                     (reinterpret_cast<std::uintptr_t>(result) -
@@ -247,18 +250,19 @@ bool unpack_t::unpack(std::vector<std::uint8_t> &output) {
 
   // determines if a relocation block exists for a given page...
   static const auto has_reloc_page = [&](std::uint32_t page) -> bool {
-    auto img = reinterpret_cast<win::image_t<> *>(output.data());
+    auto img = reinterpret_cast<win::image_t<>*>(output.data());
     auto sections = img->get_nt_headers()->get_sections();
     auto section_cnt = img->get_file_header()->num_sections;
 
     auto basereloc_dir =
         img->get_directory(win::directory_id::directory_entry_basereloc);
-    auto reloc_dir = reinterpret_cast<win::reloc_directory_t *>(
+    auto reloc_dir = reinterpret_cast<win::reloc_directory_t*>(
         basereloc_dir->rva + output.data());
-    win::reloc_block_t *reloc_block = &reloc_dir->first_block;
+    win::reloc_block_t* reloc_block = &reloc_dir->first_block;
 
     while (reloc_block->base_rva && reloc_block->size_block) {
-      if (reloc_block->base_rva == page) return true;
+      if (reloc_block->base_rva == page)
+        return true;
 
       reloc_block = reloc_block->next();
     }
@@ -268,7 +272,7 @@ bool unpack_t::unpack(std::vector<std::uint8_t> &output) {
 
   // calc size to add new reloc info...
   std::size_t resize_cnt = 0ull;
-  for (const auto &[reloc_rva, relocs] : new_relocs)
+  for (const auto& [reloc_rva, relocs] : new_relocs)
     if (!has_reloc_page(reloc_rva))
       resize_cnt += sizeof(win::reloc_block_t) +
                     (relocs.size() * sizeof(win::reloc_entry_t));
@@ -278,12 +282,12 @@ bool unpack_t::unpack(std::vector<std::uint8_t> &output) {
 
   resize_cnt += sizeof(win::reloc_block_t) + basereloc_dir->size;
   output.resize(output.size() + resize_cnt);
-  output_img = reinterpret_cast<win::image_t<> *>(output.data());
+  output_img = reinterpret_cast<win::image_t<>*>(output.data());
 
   basereloc_dir =
       output_img->get_directory(win::directory_id::directory_entry_basereloc);
 
-  auto reloc_dir = reinterpret_cast<win::reloc_directory_t *>(
+  auto reloc_dir = reinterpret_cast<win::reloc_directory_t*>(
       basereloc_dir->rva + output.data());
 
   // move .reloc section to the end of the file...
@@ -291,7 +295,7 @@ bool unpack_t::unpack(std::vector<std::uint8_t> &output) {
       output_img->get_nt_headers()->get_sections(),
       output_img->get_nt_headers()->get_sections() +
           output_img->get_nt_headers()->file_header.num_sections,
-      [&](coff::section_header_t &hdr) {
+      [&](coff::section_header_t& hdr) {
         if (hdr.virtual_address == basereloc_dir->rva) {
           hdr.virtual_size = resize_cnt;
           hdr.size_raw_data = resize_cnt;
@@ -316,10 +320,11 @@ bool unpack_t::unpack(std::vector<std::uint8_t> &output) {
       ~0xFFFull;
 
   // add new relocs to the .reloc section...
-  for (const auto &[reloc_rva, relocs] : new_relocs) {
-    if (has_reloc_page(reloc_rva)) continue;
+  for (const auto& [reloc_rva, relocs] : new_relocs) {
+    if (has_reloc_page(reloc_rva))
+      continue;
 
-    win::reloc_block_t *reloc_block = &reloc_dir->first_block;
+    win::reloc_block_t* reloc_block = &reloc_dir->first_block;
     while (reloc_block->base_rva && reloc_block->size_block)
       reloc_block = reloc_block->next();
 
@@ -338,7 +343,7 @@ bool unpack_t::unpack(std::vector<std::uint8_t> &output) {
   return true;
 }
 
-void unpack_t::local_alloc_hook(uc_engine *uc_ctx, unpack_t *obj) {
+void unpack_t::local_alloc_hook(uc_engine* uc_ctx, unpack_t* obj) {
   uc_err err;
   std::uintptr_t rax, rdx;
 
@@ -363,7 +368,12 @@ void unpack_t::local_alloc_hook(uc_engine *uc_ctx, unpack_t *obj) {
   }
 }
 
-void unpack_t::local_free_hook(uc_engine *uc_ctx, unpack_t *obj) {
+void unpack_t::is_debugger_present_hook(uc_engine* uc, unpack_t* obj) {
+  std::uintptr_t rax = 0ull;
+  uc_reg_write(uc, UC_X86_REG_RAX, &rax);
+}
+
+void unpack_t::local_free_hook(uc_engine* uc_ctx, unpack_t* obj) {
   uc_err err;
   std::uintptr_t rax = 0ull;
 
@@ -373,34 +383,34 @@ void unpack_t::local_free_hook(uc_engine *uc_ctx, unpack_t *obj) {
   }
 }
 
-void unpack_t::unmap_view_of_file_hook(uc_engine *uc, unpack_t *obj) {
+void unpack_t::unmap_view_of_file_hook(uc_engine* uc, unpack_t* obj) {
   std::uintptr_t rcx, rax = true;
   uc_reg_read(uc, UC_X86_REG_RCX, &rcx);
   uc_reg_write(uc, UC_X86_REG_RAX, &rax);
   std::printf("> UnmapViewOfFile(%p)\n", rcx);
 }
 
-void unpack_t::close_handle_hook(uc_engine *uc, unpack_t *obj) {
+void unpack_t::close_handle_hook(uc_engine* uc, unpack_t* obj) {
   std::uintptr_t rcx, rax = true;
   uc_reg_read(uc, UC_X86_REG_RCX, &rcx);
   uc_reg_write(uc, UC_X86_REG_RAX, &rax);
   std::printf("> CloseHandle(%x)\n", rcx);
 }
 
-void unpack_t::get_module_file_name_w_hook(uc_engine *uc, unpack_t *obj) {
+void unpack_t::get_module_file_name_w_hook(uc_engine* uc, unpack_t* obj) {
   uc_err err;
   std::uintptr_t rcx, rdx, r8;
   uc_reg_read(uc, UC_X86_REG_RCX, &rcx);
   uc_reg_read(uc, UC_X86_REG_RDX, &rdx);
   uc_reg_read(uc, UC_X86_REG_R8, &r8);
   std::printf("> GetModuleFileNameW(%p, %p, %d)\n", rcx, rdx, r8);
-  uc_strcpy(uc, rdx, (char *)obj->module_name.c_str());
+  uc_strcpy(uc, rdx, (char*)obj->module_name.c_str());
 
   std::uint32_t size = obj->module_name.size();
   uc_reg_write(uc, UC_X86_REG_RAX, &size);
 }
 
-void unpack_t::create_file_w_hook(uc_engine *uc, unpack_t *obj) {
+void unpack_t::create_file_w_hook(uc_engine* uc, unpack_t* obj) {
   char buff[256];
   std::uintptr_t rcx, rax = PACKED_FILE_HANDLE;
   uc_reg_read(uc, UC_X86_REG_RCX, &rcx);
@@ -410,7 +420,7 @@ void unpack_t::create_file_w_hook(uc_engine *uc, unpack_t *obj) {
   uc_reg_write(uc, UC_X86_REG_RAX, &rax);
 }
 
-void unpack_t::get_file_size_hook(uc_engine *uc, unpack_t *obj) {
+void unpack_t::get_file_size_hook(uc_engine* uc, unpack_t* obj) {
   std::uintptr_t rcx, rdx, rax;
   uc_reg_read(uc, UC_X86_REG_RCX, &rcx);
   uc_reg_read(uc, UC_X86_REG_RDX, &rdx);
@@ -425,7 +435,7 @@ void unpack_t::get_file_size_hook(uc_engine *uc, unpack_t *obj) {
   }
 }
 
-void unpack_t::create_file_mapping_hook(uc_engine *uc, unpack_t *obj) {
+void unpack_t::create_file_mapping_hook(uc_engine* uc, unpack_t* obj) {
   std::uintptr_t rcx, r8, rax = PACKED_FILE_HANDLE;
   uc_reg_read(uc, UC_X86_REG_RCX, &rcx);
   uc_reg_read(uc, UC_X86_REG_R8, &r8);
@@ -438,7 +448,7 @@ void unpack_t::create_file_mapping_hook(uc_engine *uc, unpack_t *obj) {
   }
 }
 
-void unpack_t::map_view_of_file_hook(uc_engine *uc, unpack_t *obj) {
+void unpack_t::map_view_of_file_hook(uc_engine* uc, unpack_t* obj) {
   std::uintptr_t rcx, rdx, r8, r9, rax;
   uc_reg_read(uc, UC_X86_REG_RCX, &rcx);
   uc_reg_read(uc, UC_X86_REG_RDX, &rdx);
@@ -472,7 +482,7 @@ void unpack_t::map_view_of_file_hook(uc_engine *uc, unpack_t *obj) {
   }
 }
 
-void unpack_t::virtual_protect_hook(uc_engine *uc, unpack_t *obj) {
+void unpack_t::virtual_protect_hook(uc_engine* uc, unpack_t* obj) {
   std::uintptr_t rcx, rdx, r8, r9, rax = true;
   uc_reg_read(uc, UC_X86_REG_RCX, &rcx);
   uc_reg_read(uc, UC_X86_REG_RDX, &rdx);
@@ -482,7 +492,7 @@ void unpack_t::virtual_protect_hook(uc_engine *uc, unpack_t *obj) {
   uc_reg_write(uc, UC_X86_REG_RAX, &rax);
 }
 
-void unpack_t::load_library_hook(uc_engine *uc_ctx, unpack_t *obj) {
+void unpack_t::load_library_hook(uc_engine* uc_ctx, unpack_t* obj) {
   uc_err err;
   std::uintptr_t rcx = 0ull;
 
@@ -506,7 +516,7 @@ void unpack_t::load_library_hook(uc_engine *uc_ctx, unpack_t *obj) {
       exit(-1);
     }
 
-    auto img = reinterpret_cast<win::image_t<> *>(module_data.data());
+    auto img = reinterpret_cast<win::image_t<>*>(module_data.data());
     auto image_size = img->get_nt_headers()->optional_header.size_image;
 
     tmp.resize(image_size);
@@ -514,7 +524,7 @@ void unpack_t::load_library_hook(uc_engine *uc_ctx, unpack_t *obj) {
     std::for_each(img->get_nt_headers()->get_sections(),
                   img->get_nt_headers()->get_sections() +
                       img->get_nt_headers()->file_header.num_sections,
-                  [&](const auto &section_header) {
+                  [&](const auto& section_header) {
                     std::memcpy(
                         tmp.data() + section_header.virtual_address,
                         module_data.data() + section_header.ptr_raw_data,
@@ -522,31 +532,38 @@ void unpack_t::load_library_hook(uc_engine *uc_ctx, unpack_t *obj) {
                   });
 
     const auto module_base = reinterpret_cast<std::uintptr_t>(tmp.data());
-    img = reinterpret_cast<win::image_t<> *>(module_base);
+    img = reinterpret_cast<win::image_t<>*>(module_base);
     const auto image_base = img->get_nt_headers()->optional_header.image_base;
     const auto alloc_addr = module_base & ~0xFFFull;
     obj->loaded_modules[buff] = alloc_addr;
 
-    // install iat hooks...
-    for (auto import_dir = reinterpret_cast<win::import_directory_t *>(
-             img->get_directory(win::directory_id::directory_entry_import)
-                 ->rva +
-             module_base);
-         import_dir->rva_name; ++import_dir) {
-      for (auto iat_thunk = reinterpret_cast<win::image_thunk_data_t<> *>(
-               import_dir->rva_first_thunk + module_base);
-           iat_thunk->address; ++iat_thunk) {
-        if (iat_thunk->is_ordinal) continue;
+    auto dir = reinterpret_cast<win::import_directory_t*>(
+        img->get_directory(win::directory_id::directory_entry_import));
 
-        auto iat_name = reinterpret_cast<win::image_named_import_t *>(
-            iat_thunk->address + module_base);
+    if (dir) {
+      // install iat hooks...
+      for (auto import_dir = reinterpret_cast<win::import_directory_t*>(
+               img->get_directory(win::directory_id::directory_entry_import)
+                   ->rva +
+               module_base);
+           import_dir->rva_name; ++import_dir) {
+        for (auto iat_thunk = reinterpret_cast<win::image_thunk_data_t<>*>(
+                 import_dir->rva_first_thunk + module_base);
+             iat_thunk->address; ++iat_thunk) {
+          if (iat_thunk->is_ordinal)
+            continue;
 
-        if (obj->iat_hooks.find(iat_name->name) != obj->iat_hooks.end()) {
-          std::printf("> iat hooking %s to vector table %p\n", iat_name->name,
-                      obj->iat_hooks[iat_name->name].first + IAT_VECTOR_TABLE);
+          auto iat_name = reinterpret_cast<win::image_named_import_t*>(
+              iat_thunk->address + module_base);
 
-          iat_thunk->function =
-              obj->iat_hooks[iat_name->name].first + IAT_VECTOR_TABLE;
+          if (obj->iat_hooks.find(iat_name->name) != obj->iat_hooks.end()) {
+            std::printf(
+                "> iat hooking %s to vector table %p\n", iat_name->name,
+                obj->iat_hooks[iat_name->name].first + IAT_VECTOR_TABLE);
+
+            iat_thunk->function =
+                obj->iat_hooks[iat_name->name].first + IAT_VECTOR_TABLE;
+          }
         }
       }
     }
@@ -577,7 +594,7 @@ void unpack_t::load_library_hook(uc_engine *uc_ctx, unpack_t *obj) {
   }
 }  // namespace engine
 
-void unpack_t::uc_strcpy(uc_engine *uc_ctx, char *buff, std::uintptr_t addr) {
+void unpack_t::uc_strcpy(uc_engine* uc_ctx, char* buff, std::uintptr_t addr) {
   uc_err err;
   char i = 0u;
   auto idx = 0ul;
@@ -590,7 +607,7 @@ void unpack_t::uc_strcpy(uc_engine *uc_ctx, char *buff, std::uintptr_t addr) {
   } while ((buff[idx++] = i));
 }
 
-void unpack_t::uc_strcpy(uc_engine *uc, std::uintptr_t addr, char *buff) {
+void unpack_t::uc_strcpy(uc_engine* uc, std::uintptr_t addr, char* buff) {
   uc_err err;
   for (char idx = 0u, c = buff[idx]; buff[idx]; ++idx, c = buff[idx]) {
     if ((err = uc_mem_write(uc, addr + idx, &c, sizeof c))) {
@@ -600,10 +617,12 @@ void unpack_t::uc_strcpy(uc_engine *uc, std::uintptr_t addr, char *buff) {
   }
 }
 
-bool unpack_t::iat_dispatcher(uc_engine *uc, uint64_t address, uint32_t size,
-                              unpack_t *unpack) {
+bool unpack_t::iat_dispatcher(uc_engine* uc,
+                              uint64_t address,
+                              uint32_t size,
+                              unpack_t* unpack) {
   auto vec = address - IAT_VECTOR_TABLE;
-  for (auto &[iat_name, iat_hook_data] : unpack->iat_hooks) {
+  for (auto& [iat_name, iat_hook_data] : unpack->iat_hooks) {
     if (iat_hook_data.first == vec) {
       iat_hook_data.second(uc, unpack);
       return true;
@@ -612,9 +631,12 @@ bool unpack_t::iat_dispatcher(uc_engine *uc, uint64_t address, uint32_t size,
   return false;
 }
 
-bool unpack_t::unpack_section_callback(uc_engine *uc, uc_mem_type type,
-                                       uint64_t address, int size,
-                                       int64_t value, unpack_t *unpack) {
+bool unpack_t::unpack_section_callback(uc_engine* uc,
+                                       uc_mem_type type,
+                                       uint64_t address,
+                                       int size,
+                                       int64_t value,
+                                       unpack_t* unpack) {
   if (address == unpack->pack_section_offset + unpack->img_base) {
     std::printf("> last byte written to unpack section... dumping...\n");
     uc_emu_stop(uc);
@@ -623,8 +645,12 @@ bool unpack_t::unpack_section_callback(uc_engine *uc, uc_mem_type type,
   return true;
 }
 
-void unpack_t::invalid_mem(uc_engine *uc, uc_mem_type type, uint64_t address,
-                           int size, int64_t value, unpack_t *unpack) {
+void unpack_t::invalid_mem(uc_engine* uc,
+                           uc_mem_type type,
+                           uint64_t address,
+                           int size,
+                           int64_t value,
+                           unpack_t* unpack) {
   switch (type) {
     case UC_MEM_READ_UNMAPPED: {
       uc_mem_map(uc, address & ~0xFFFull, PAGE_4KB, UC_PROT_ALL);

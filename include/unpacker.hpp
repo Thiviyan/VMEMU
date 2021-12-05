@@ -32,6 +32,8 @@
 #define UNMAP_VIEW_OF_FILE_VECTOR 11
 #define CLOSE_HANDLE_VECTOR 12
 #define VIRTUAL_PROTECT_VECTOR 13
+#define IS_DEBUGGER_PRESENT_VECTOR 14
+#define IS_REMOTE_DEBUGGER_PRESENT_VECTOR 15
 
 #define MOV_RAX_0_SIG "\x48\xB8\x00\x00\x00\x00\x00\x00\x00\x00"
 #define MOV_RAX_0_MASK "xxxxxxxxxx"
@@ -42,48 +44,58 @@ static_assert(sizeof MOV_RAX_0_SIG == sizeof MOV_RAX_0_MASK,
 namespace engine {
 class unpack_t {
  public:
-  explicit unpack_t(const std::string &module_name,
-                    const std::vector<std::uint8_t> &bin);
+  explicit unpack_t(const std::string& module_name,
+                    const std::vector<std::uint8_t>& bin);
   ~unpack_t(void);
 
   bool init(void);
-  bool unpack(std::vector<std::uint8_t> &output);
+  bool unpack(std::vector<std::uint8_t>& output);
 
  private:
-  using iat_hook_t = std::function<void(uc_engine *, unpack_t *)>;
+  using iat_hook_t = std::function<void(uc_engine*, unpack_t*)>;
 
-  uc_engine *uc_ctx;
+  uc_engine* uc_ctx;
   std::vector<uint8_t> bin, map_bin;
-  std::vector<uc_hook *> uc_hooks;
+  std::vector<uc_hook*> uc_hooks;
   std::string module_name;
 
   std::uintptr_t img_base, img_size, heap_offset, pack_section_offset;
-  win::image_t<> *win_img;
+  win::image_t<>* win_img;
 
-  static void local_alloc_hook(uc_engine *, unpack_t *);
-  static void local_free_hook(uc_engine *, unpack_t *);
-  static void load_library_hook(uc_engine *, unpack_t *);
-  static void get_module_file_name_w_hook(uc_engine *, unpack_t *);
-  static void create_file_w_hook(uc_engine *, unpack_t *);
-  static void get_file_size_hook(uc_engine *, unpack_t *);
-  static void create_file_mapping_hook(uc_engine *, unpack_t *);
-  static void map_view_of_file_hook(uc_engine *, unpack_t *);
-  static void unmap_view_of_file_hook(uc_engine *, unpack_t *);
-  static void close_handle_hook(uc_engine *, unpack_t *);
-  static void virtual_protect_hook(uc_engine *, unpack_t *);
+  static void local_alloc_hook(uc_engine*, unpack_t*);
+  static void local_free_hook(uc_engine*, unpack_t*);
+  static void load_library_hook(uc_engine*, unpack_t*);
+  static void get_module_file_name_w_hook(uc_engine*, unpack_t*);
+  static void create_file_w_hook(uc_engine*, unpack_t*);
+  static void get_file_size_hook(uc_engine*, unpack_t*);
+  static void create_file_mapping_hook(uc_engine*, unpack_t*);
+  static void map_view_of_file_hook(uc_engine*, unpack_t*);
+  static void unmap_view_of_file_hook(uc_engine*, unpack_t*);
+  static void close_handle_hook(uc_engine*, unpack_t*);
+  static void virtual_protect_hook(uc_engine*, unpack_t*);
+  static void is_debugger_present_hook(uc_engine*, unpack_t*);
 
-  static void uc_strcpy(uc_engine *uc, char *buff, std::uintptr_t addr);
-  static void uc_strcpy(uc_engine *uc, std::uintptr_t addr, char *buff);
+  static void uc_strcpy(uc_engine* uc, char* buff, std::uintptr_t addr);
+  static void uc_strcpy(uc_engine* uc, std::uintptr_t addr, char* buff);
 
-  static bool iat_dispatcher(uc_engine *uc, uint64_t address, uint32_t size,
-                             unpack_t *unpack);
+  static bool iat_dispatcher(uc_engine* uc,
+                             uint64_t address,
+                             uint32_t size,
+                             unpack_t* unpack);
 
-  static bool unpack_section_callback(uc_engine *uc, uc_mem_type type,
-                                      uint64_t address, int size, int64_t value,
-                                      unpack_t *unpack);
+  static bool unpack_section_callback(uc_engine* uc,
+                                      uc_mem_type type,
+                                      uint64_t address,
+                                      int size,
+                                      int64_t value,
+                                      unpack_t* unpack);
 
-  static void invalid_mem(uc_engine *uc, uc_mem_type type, uint64_t address,
-                          int size, int64_t value, unpack_t *unpack);
+  static void invalid_mem(uc_engine* uc,
+                          uc_mem_type type,
+                          uint64_t address,
+                          int size,
+                          int64_t value,
+                          unpack_t* unpack);
 
   std::map<std::string, std::uintptr_t> loaded_modules;
   std::map<std::string, std::pair<std::uint32_t, iat_hook_t> > iat_hooks = {
@@ -100,6 +112,10 @@ class unpack_t {
       {"UnmapViewOfFile",
        {UNMAP_VIEW_OF_FILE_VECTOR, &unmap_view_of_file_hook}},
       {"CloseHandle", {CLOSE_HANDLE_VECTOR, &close_handle_hook}},
-      {"VirtualProtect", {VIRTUAL_PROTECT_VECTOR, &virtual_protect_hook}}};
+      {"VirtualProtect", {VIRTUAL_PROTECT_VECTOR, &virtual_protect_hook}},
+      {"IsDebuggerPresent",
+       {IS_DEBUGGER_PRESENT_VECTOR, &is_debugger_present_hook}},
+      {"CheckRemoteDebuggerPresent",
+       {IS_REMOTE_DEBUGGER_PRESENT_VECTOR, &is_debugger_present_hook}}};
 };
 }  // namespace engine
