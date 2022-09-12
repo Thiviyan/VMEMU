@@ -1,6 +1,6 @@
 <div align="center">
     <div>
-        <img src="https://githacks.org/uploads/-/system/project/avatar/371/VMProtect.png"/>
+        <img src="https://git.back.engineering/avatars/f44edf803188fe4db5803f33944f806b"/>
     </div>
 </div>
 
@@ -30,6 +30,8 @@ cd vmemu
 cmake -B build
 ```
 
+Go into `build` and open `vmemu.sln`. Select "Release", and "x64", then build the project.
+
 # Building Instructions (Linux)
 
 ### Requirements
@@ -53,8 +55,6 @@ export CXX=/usr/bin/clang++-10
 cmake -B build && cd build
 make
 ```
-
-Go into `build` and open `vmemu.sln`. Select "Release", and "x64", then build the project.
 
 # VMProtect 2 - Virtual Machine Architecture Overview
 
