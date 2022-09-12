@@ -56,7 +56,13 @@ int __cdecl main(int argc, const char* argv[]) {
     return -1;
   }
 
+  // only support 64bit executables...
   auto img = reinterpret_cast<win::image_t<>*>(module_data.data());
+  if (img->get_nt_headers()->file_header.machine != win::machine_id::arm64) {
+    std::printf("[!] only 64bit executables are supported...\n");
+    return -1;
+  }
+
   auto image_size = img->get_nt_headers()->optional_header.size_image;
   const auto image_base = img->get_nt_headers()->optional_header.image_base;
 
