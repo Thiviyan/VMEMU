@@ -20,6 +20,9 @@ jobs:
                       
     - name: Add msbuild to PATH
       uses: microsoft/setup-msbuild@v1.0.2
+    
+    - name: config
+      run: cmake -B build
 
     - name: Build
       # Build your program with the given configuration
